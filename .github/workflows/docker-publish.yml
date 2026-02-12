@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Docker/Dockerfile
+          file: ./Dockerfile
           push: true
           tags: |
             ghcr.io/${{ vars.repo }}:latest
