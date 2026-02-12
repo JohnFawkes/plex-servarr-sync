@@ -1,0 +1,13 @@
+pycache/
+*.py[codz]
+*$py.class
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+.dockerignore
+.vscode/
+.idea/
+*.log

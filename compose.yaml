@@ -1,0 +1,19 @@
+services:
+  plex-servarr-sync:
+    image: 
+    container_name: plex-servarr-sync
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    env_file:
+      - .env
+    volumes:
+      # Optional: Mount your media folders read-only if you want 
+      # the script to verify if 'Season XX' folders exist before scanning.
+      # The paths inside the container should match your PLEX paths 
+      # or what you define in SECTION_MAPPING.
+      - /mnt/nvme/MergerFS:/data/media:ro,rslave
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PLEXAPI_HEADER_IDENTIFIER=newautoscan
