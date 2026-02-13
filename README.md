@@ -12,6 +12,8 @@ A lightweight Python-based webhook receiver designed to synchronize Sonarr and R
 
 -   **Partial Plex Scans**: Triggers Plex to scan only the specific folder added/updated, rather than the entire library.
 
+-   **Robust Plex Retries**: Automatically retries Plex operations (scan and metadata analysis) if a timeout occurs.
+
 -   **Debouncing/Consolidation**: Groups identical sync requests arriving in short windows into a single operation.
 
 -   **Minimum Age Check**: Optional wait period to ensure files are fully propagated across mounts before scanning.
@@ -124,6 +126,7 @@ Configuration is handled via environment variables in a `.env` file.
 | **Variable**               | **Description**                                 | **Example**                                        | 
 | `PLEX_URL`                 | URL of your Plex server.                        | `http://192.168.1.100:32400`                       | 
 | `PLEX_TOKEN`               | Your Plex API token.                            | `yY6Vy...`                                         | 
+| `PLEX_TIMEOUT`             | Timeout in seconds for Plex API requests.       | `60`                                               |
 | `RCLONE_RC_URL`            | URL of the Rclone RC server.                    | `http://192.168.1.1:5580`                          | 
 | `RCLONE_MOUNT_ROOT`        | The base mount path on the Rclone host.         | `/mnt/media`                                       | 
 | `PATH_REPLACEMENTS`        | JSON map of Sonarr paths to Plex paths.         | `'{"/home/user/media": "/data/media"}'`            | 
