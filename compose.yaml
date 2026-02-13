@@ -1,19 +1,67 @@
 services:
   plex-servarr-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/johnfawkes/plex-servarr-sync:latest
     container_name: plex-servarr-sync
     restart: unless-stopped
-    ports:
-      - "5001:5000"
     env_file:
       - .env
-    volumes:
-      # Optional: Mount your media folders read-only if you want 
-      # the script to verify if 'Season XX' folders exist before scanning.
-      # The paths inside the container should match your PLEX paths 
-      # or what you define in SECTION_MAPPING.
-      - /mnt/nvme/MergerFS:/data/media:ro,rslave
-      - ./.env:/app/.env:ro
+
+    ports:
+      - "${PORT:-5000}:5000"
+
     environment:
-      - PYTHONUNBUFFERED=1
-      - PLEXAPI_HEADER_IDENTIFIER=newautoscan
+      # ── Plex ──────────────────────────────────────────────────────────────
+      PLEX_URL:     "${PLEX_URL:-http://192.168.1.100:32400}"
+      PLEX_TOKEN:   "${PLEX_TOKEN}"
+      PLEX_TIMEOUT: "${PLEX_TIMEOUT:-60}"
+      # Stable identifier so Plex doesn't create a new device on every restart
+      PLEX_IDENTIFIER: "${PLEX_IDENTIFIER:-plex-servarr-sync}"
+
+      # ── Rclone RC ──────────────────────────────────────────────────────────
+      # Set USE_RCLONE=true only if you use an rclone VFS mount.
+      # All RCLONE_* vars below are ignored when USE_RCLONE=false.
+      USE_RCLONE:           "${USE_RCLONE:-false}"
+      RCLONE_RC_URL:        "${RCLONE_RC_URL:-}"     # e.g. http://rclone:5572
+      RCLONE_RC_USER:       "${RCLONE_RC_USER:-}"
+      RCLONE_RC_PASS:       "${RCLONE_RC_PASS:-}"
+      RCLONE_MOUNT_ROOT:    "${RCLONE_MOUNT_ROOT:-}" # e.g. /mnt/media
+
+      # ── Timing ────────────────────────────────────────────────────────────
+      WEBHOOK_DELAY: "${WEBHOOK_DELAY:-30}"  # wait after webhook before scanning (s/m/h)
+      MINIMUM_AGE:   "${MINIMUM_AGE:-0}"     # minimum file age before scan (e.g. 60s)
+
+      # ── Path mappings (JSON) ───────────────────────────────────────────────
+      # Map paths as Sonarr/Radarr reports them → paths inside this container.
+      # Example: '{ "/remote/tv": "/mnt/media/tv" }'
+      PATH_REPLACEMENTS:        "${PATH_REPLACEMENTS:-{}}"
+      # Only needed when USE_RCLONE=true. Maps paths to rclone host paths.
+      RCLONE_PATH_REPLACEMENTS: "${RCLONE_PATH_REPLACEMENTS:-{}}"
+
+      # Map path prefixes → Plex library section IDs.
+      # Example: '{ "/mnt/media/tv": "1", "/mnt/media/movies": "2" }'
+      SECTION_MAPPING: "${SECTION_MAPPING:-{}}"
+
+      # ── Manual UI auth ────────────────────────────────────────────────────
+      MANUAL_USER: "${MANUAL_USER:-admin}"
+      MANUAL_PASS: "${MANUAL_PASS:-changeme}"
+
+    # Mount the same media root that Plex uses so age-checks work.
+    # Remove this volume if you don't use MINIMUM_AGE.
+    volumes:
+      - "${MEDIA_ROOT:-/mnt/media}:${MEDIA_ROOT:-/mnt/media}:ro,rslave"
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

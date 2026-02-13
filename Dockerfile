@@ -1,20 +1,35 @@
-# Use a lightweight Python base image
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS base
 
-# Set the working directory
+# ── System deps ──────────────────────────────────────────────────────────────
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Non-root user ─────────────────────────────────────────────────────────────
+RUN groupadd --gid 1000 appuser \
+ && useradd  --uid 1000 --gid 1000 --no-create-home appuser
+
 WORKDIR /app
 
-# Copy requirements and install them
-# We install flask, requests, and python-dotenv
-RUN pip install --no-cache-dir flask requests python-dotenv plexapi
+# ── Python deps (cached layer) ────────────────────────────────────────────────
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the script into the container
-COPY plex_servarr_webhook.py .
+# ── App source ────────────────────────────────────────────────────────────────
+COPY plex_sync.py .
 
-# Expose the port defined in the script (default 5000)
+# Drop privileges
+USER appuser
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 EXPOSE 5000
 
-ENV PYTHONUNBUFFERED=1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -sf http://localhost:5000/health || exit 1
 
-# Run the script
-CMD ["python", "plex_servarr_webhook.py"]
+ENTRYPOINT ["python", "plex_servarr_webhook.py"]
