@@ -46,7 +46,7 @@ def parse_duration(duration_str):
 # --- CONFIGURATION ---
 PLEX_URL = os.getenv("PLEX_URL", "http://127.0.0.1:32400").rstrip('/')
 PLEX_TOKEN = os.getenv("PLEX_TOKEN", "")
-PLEX_TIMEOUT = int(os.getenv("PLEX_TIMEOUT", 60))  # Default to 60s
+PLEX_TIMEOUT = int(os.getenv("PLEX_TIMEOUT", 60))
 PORT = int(os.getenv("PORT", 5000))
 RCLONE_RC_URL = os.getenv("RCLONE_RC_URL", "").rstrip('/')
 RCLONE_RC_USER = os.getenv("RCLONE_RC_USER", "")
@@ -64,13 +64,17 @@ MANUAL_PASS = os.getenv("MANUAL_PASS", "password")
 
 # --- GLOBALS ---
 sync_queue = queue.Queue()
-try:
-    # Initialize with timeout
-    plex = PlexServer(PLEX_URL, PLEX_TOKEN, timeout=PLEX_TIMEOUT)
-    print(f"--- Connected to Plex: {plex.friendlyName} (Timeout: {PLEX_TIMEOUT}s) ---", flush=True)
-except Exception as e:
-    print(f"!!! ERROR: Could not connect to Plex: {e} !!!", flush=True)
-    plex = None
+plex = None
+
+def get_plex_connection():
+    global plex
+    if plex is None:
+        try:
+            plex = PlexServer(PLEX_URL, PLEX_TOKEN, timeout=PLEX_TIMEOUT)
+            print(f"--- Connected to Plex: {plex.friendlyName} (Timeout: {PLEX_TIMEOUT}s) ---", flush=True)
+        except Exception as e:
+            print(f"!!! ERROR: Could not connect to Plex: {e} !!!", flush=True)
+    return plex
 
 # --- AUTH DECORATOR ---
 def check_auth(username, password):
@@ -154,6 +158,8 @@ def rclone_vfs_refresh(rclone_host_path, label):
 # --- BACKGROUND WORKER ---
 def sync_worker():
     print("--- Sync Worker Started ---", flush=True)
+    plex_instance = get_plex_connection()
+    
     while True:
         task = sync_queue.get()
         if task is None: break
@@ -171,10 +177,8 @@ def sync_worker():
         for item in pending_items: sync_queue.put(item)
 
         try:
-            # 1. Rclone Refresh
             rclone_vfs_refresh(rclone_host_path, label)
 
-            # 2. Minimum Age Check
             if MINIMUM_AGE > 0:
                 check_path = age_check_path.rstrip('/')
                 if os.path.exists(check_path):
@@ -187,15 +191,13 @@ def sync_worker():
                 else:
                     print(f"[{label}] [AGE] Warning: Folder not visible inside container: {check_path}", flush=True)
 
-            if plex:
-                # Retry loop for Plex operations (Scan and Analysis)
+            if plex_instance:
                 for attempt in range(3):
                     try:
-                        library = plex.library.sectionByID(section_id)
+                        library = plex_instance.library.sectionByID(section_id)
                         print(f"[{label}] [SCAN] Triggering Plex scan for: {mapped_folder} (Attempt {attempt+1}/3)", flush=True)
                         library.update(path=mapped_folder)
                         
-                        # 3. Buffer and Metadata
                         time.sleep(20)
                         search_path = mapped_folder.rstrip('/')
                         folder_name = os.path.basename(search_path)
@@ -206,12 +208,12 @@ def sync_worker():
                             print(f"[{label}] [METADATA] Lookup {i+1}/6 for '{clean_title}'", flush=True)
                             try:
                                 encoded = urllib.parse.quote(search_path)
-                                xml = plex.query(f"/library/sections/{section_id}/all?path={encoded}")
-                                container = MediaContainer(plex, xml)
+                                xml = plex_instance.query(f"/library/sections/{section_id}/all?path={encoded}")
+                                container = MediaContainer(plex_instance, xml)
                                 if container.metadata:
                                     item = container.metadata[0]
                             except Exception as e:
-                                if "timeout" in str(e).lower(): raise e # Bubble up to outer retry
+                                if "timeout" in str(e).lower(): raise e
                                 pass
                             
                             if not item:
@@ -232,8 +234,6 @@ def sync_worker():
                             item.analyze()
                         else:
                             print(f"[{label}] [METADATA] Warning: Item not found in DB.", flush=True)
-                        
-                        # If we reached here without exception, break the attempt loop
                         break
 
                     except Exception as e:
@@ -242,7 +242,6 @@ def sync_worker():
                             time.sleep(10)
                             continue
                         else:
-                            # Re-raise for the general worker error handler if not a timeout or last attempt
                             raise e
 
         except Exception as e:
@@ -250,8 +249,6 @@ def sync_worker():
         
         sync_queue.task_done()
         time.sleep(5)
-
-threading.Thread(target=sync_worker, daemon=True).start()
 
 # --- ROUTES ---
 def process_webhook(data, instance_type):
@@ -322,15 +319,18 @@ def manual_webhook():
         <body style="font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px;">
             <h2>Manual Plex Sync</h2>
             {% if message %}<p style="color: blue;">{{ message }}</p>{% endif %}
-            <p>Enter the path as provided by Sonarr/Radarr (e.g. /home/johnfawkes/MergerFS/tvshows/ShowName):</p>
+            <p>Enter path (e.g. /home/johnfawkes/MergerFS/tvshows/ShowName):</p>
             <form method="post">
-                <input type="text" name="path" placeholder="/home/johnfawkes/MergerFS/..." style="width:100%; padding: 8px; margin-bottom: 10px;">
-                <button type="submit" style="padding: 10px 20px; cursor: pointer;">Trigger Sync</button>
+                <input type="text" name="path" style="width:100%; padding: 8px; margin-bottom: 10px;">
+                <button type="submit" style="padding: 10px 20px;">Trigger Sync</button>
             </form>
         </body>
         </html>
     ''', message=message)
 
 if __name__ == '__main__':
+    # Start worker thread inside main only
+    threading.Thread(target=sync_worker, daemon=True).start()
     print(f"--- Servarr Sync Receiver Active on Port {PORT} ---", flush=True)
-    app.run(host='0.0.0.0', port=PORT)
+    # Explicitly disable reloader to prevent double-start in Docker
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
