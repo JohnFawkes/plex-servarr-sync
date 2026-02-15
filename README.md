@@ -25,6 +25,11 @@ Sonarr / Radarr  →  plex-servarr-sync  →  [rclone vfs/forget + vfs/refresh] 
 
 ---
 
+## **📷Screenshots**
+
+* **WebUI**
+![WebUI](screenshots/webui.png)
+
 ## Quick Start
 
 ### 1. Clone
