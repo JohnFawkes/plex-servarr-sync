@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.14-slim AS base
+FROM python:3.12-slim AS base
 
 # ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update \
@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── App source ────────────────────────────────────────────────────────────────
-COPY plex_servarr_webhook.py .
+COPY plex_sync.py .
 
 # Drop privileges
 USER appuser
@@ -32,6 +32,6 @@ ENV PORT=${PORT}
 EXPOSE ${PORT}
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD curl -sf http://localhost:${PORT:-5000}/health || exit 1
+  CMD /bin/sh -c 'curl -sf http://localhost:${PORT:-5000}/health || exit 1'
 
-ENTRYPOINT ["python", "plex_servarr_webhook.py"]
+ENTRYPOINT ["python", "plex_sync.py"]
