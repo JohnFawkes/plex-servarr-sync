@@ -35,7 +35,7 @@ Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]
 ### 1. Clone
 
 ```bash
-git clone https://github.com/youruser/media-servarr-sync.git
+git clone https://github.com/johnfawkes/media-servarr-sync.git
 cd media-servarr-sync
 ```
 
@@ -62,8 +62,8 @@ All configuration is done via environment variables (or a `.env` file in the pro
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PLEX_URL` | ✔️  | `http://127.0.0.1:32400` | URL of your Plex Media Server |
-| `PLEX_TOKEN` | ✔️  | — | Your Plex authentication token ([how to find it](https://support.plex.tv/articles/204059436)) |
+| `PLEX_URL` | ✔️ | `http://127.0.0.1:32400` | URL of your Plex Media Server |
+| `PLEX_TOKEN` | ✔️ | — | Your Plex authentication token ([how to find it](https://support.plex.tv/articles/204059436)) |
 | `PLEX_TIMEOUT` | | `60` | Plex API call timeout. Accepts same duration format as `WEBHOOK_DELAY` e.g. `60`, `2m` |
 | `PLEXAPI_HEADER_IDENTIFIER` | | `media-servarr-sync` | Stable client identifier sent to Plex — prevents a new device being registered on every container restart |
 | `TZ` | | `UTC` | IANA timezone for log timestamps and sync history, e.g. `America/New_York`, `Europe/London` |
@@ -71,11 +71,11 @@ All configuration is done via environment variables (or a `.env` file in the pro
 | `WEBHOOK_DELAY` | | `30` | Time to wait after receiving a webhook before acting. Accepts `30`, `30s`, `5m`, `1h` |
 | `MINIMUM_AGE` | | `0` | Minimum file age before scanning. Same format as `WEBHOOK_DELAY`. `0` disables |
 | `HISTORY_DAYS` | | `7` | Number of days to retain sync history. Older entries are auto-deleted. |
-| `SECTION_MAPPING` | ✔️  | `{}` | JSON map of path prefixes → Plex library section IDs |
+| `SECTION_MAPPING` | ✔️ | `{}` | JSON map of path prefixes → Plex library section IDs |
 | `PATH_REPLACEMENTS` | | `{}` | JSON map: Sonarr/Radarr path prefix → path as seen inside this container |
 | `MANUAL_USER` | | `admin` | Username for the manual trigger UI |
 | `MANUAL_PASS` | | `changeme` | Password for the manual trigger UI |
-| `SECRET_KEY` | ✔️  | random | Secret used to sign session cookies. Generate with `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `SECRET_KEY` | ✔️  | `random` | Secret used to sign session cookies. Generate with `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `MEDIA_ROOT` | | `/mnt/media` | Host path mounted read-only for age checks (only needed if `MINIMUM_AGE > 0`) |
 
 ### Rclone settings
