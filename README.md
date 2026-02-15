@@ -70,6 +70,7 @@ All configuration is done via environment variables (or a `.env` file in the pro
 | `PORT` | | `5000` | Port the webhook receiver listens on |
 | `WEBHOOK_DELAY` | | `30` | Time to wait after receiving a webhook before acting. Accepts `30`, `30s`, `5m`, `1h`  |
 | `MINIMUM_AGE` | | `0` | Minimum file age before scanning. Same format as `WEBHOOK_DELAY`. `0` disables |
+| `HISTORY_DAYS` | | `7` | Number of days to retain sync history. Older entries are auto-deleted. |
 | `SECTION_MAPPING` | ✔️ | `{}` | JSON map of path prefixes → Plex library section IDs |
 | `PATH_REPLACEMENTS` | | `{}` | JSON map: Sonarr/Radarr path prefix → path as seen inside this container |
 | `MANUAL_USER` | | `admin` | Username for the manual trigger UI |

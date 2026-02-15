@@ -1,6 +1,9 @@
 services:
   plex-servarr-sync:
-    image: ghcr.io/johnfawkes/plex-servarr-sync:latest
+#    image: ghcr.io/johnfawkes/plex-servarr-sync:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: plex-servarr-sync
     restart: unless-stopped
     env_file:
@@ -58,6 +61,8 @@ services:
     # Remove this volume if you don't use MINIMUM_AGE.
     volumes:
       - "${MEDIA_ROOT:-/mnt/media}:${MEDIA_ROOT:-/mnt/media}:ro,rslave"
+      # Persistent storage for sync history database
+      - plex-servarr-sync-data:/data
 
     healthcheck:
       test: /bin/sh -c 'curl -sf http://localhost:$${PORT:-5000}/health || exit 1'
@@ -71,3 +76,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  plex-servarr-sync-data:

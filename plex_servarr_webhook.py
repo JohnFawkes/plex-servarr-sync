@@ -23,6 +23,7 @@ import queue
 import logging
 import signal
 import sys
+import sqlite3
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -136,6 +137,7 @@ PLEX_TIMEOUT    = parse_duration(os.getenv("PLEX_TIMEOUT", "60")) or 60
 PORT            = int(os.getenv("PORT", "5000"))
 WEBHOOK_DELAY   = parse_duration(os.getenv("WEBHOOK_DELAY", "30"))
 MINIMUM_AGE     = parse_duration(os.getenv("MINIMUM_AGE", "0"))
+HISTORY_DAYS    = int(os.getenv("HISTORY_DAYS", "7"))
 MANUAL_USER     = os.getenv("MANUAL_USER", "admin")
 MANUAL_PASS     = os.getenv("MANUAL_PASS", "password")
 # Used to sign session cookies — set a long random string in your .env
@@ -186,21 +188,79 @@ class SyncTask:
 
 
 class SyncHistory:
-    """Thread-safe ring buffer of recent sync results."""
-    def __init__(self, maxlen: int = 50):
+    """Thread-safe SQLite-backed sync history with configurable retention."""
+    def __init__(self, db_path: str = "/data/sync_history.db", retention_days: int = 7):
+        self._db_path = db_path
+        self._retention_days = retention_days
         self._lock = threading.Lock()
-        self._buf: deque = deque(maxlen=maxlen)
-
+        self._init_db()
+    
+    def _init_db(self):
+        """Initialize database schema."""
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    duration_s REAL NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON sync_history(created_at DESC)")
+            conn.commit()
+    
     def add(self, entry: dict):
+        """Add a sync entry and prune old records."""
         with self._lock:
-            self._buf.appendleft(entry)
-
+            cutoff = time.time() - (self._retention_days * 86400)
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("""
+                    INSERT INTO sync_history (ts, label, path, status, error, duration_s, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    entry['ts'],
+                    entry['label'],
+                    entry['path'],
+                    entry['status'],
+                    entry.get('error', ''),
+                    entry['duration_s'],
+                    time.time()
+                ))
+                # Prune old entries
+                conn.execute("DELETE FROM sync_history WHERE created_at < ?", (cutoff,))
+                conn.commit()
+    
+    def get_recent(self, limit: int = 50, offset: int = 0) -> list:
+        """Get recent entries with pagination."""
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT ts, label, path, status, error, duration_s
+                    FROM sync_history
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                """, (limit, offset))
+                return [dict(row) for row in cursor.fetchall()]
+    
+    def count(self) -> int:
+        """Get total number of entries in retention window."""
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM sync_history")
+                return cursor.fetchone()[0]
+    
     def as_list(self) -> list:
-        with self._lock:
-            return list(self._buf)
+        """For backward compatibility with old code."""
+        return self.get_recent(limit=50)
 
 
-history = SyncHistory()
+history = SyncHistory(db_path="/data/sync_history.db", retention_days=HISTORY_DAYS)
 sync_queue: queue.Queue = queue.Queue()
 _in_flight: set = set()         # mapped_folder strings currently queued or being processed
 _in_flight_lock = threading.Lock()
@@ -397,7 +457,7 @@ def _find_plex_item(plex_instance, library, task: SyncTask):
         except Exception as exc:
             if "timeout" in str(exc).lower():
                 raise
-
+        
         # Fallback: title search + path match
         try:
             for res in library.search(title=clean_title):
@@ -537,8 +597,25 @@ def manual_webhook():
             message = "✗ No path provided."
             msg_class = "error"
 
-    recent = history.as_list()
-    return render_template_string(MANUAL_UI_TEMPLATE, message=message, msg_class=msg_class, history=recent)
+    # Pagination
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = 25
+    offset = (page - 1) * per_page
+    
+    recent = history.get_recent(limit=per_page, offset=offset)
+    total_count = history.count()
+    total_pages = (total_count + per_page - 1) // per_page  # ceiling division
+    
+    return render_template_string(
+        MANUAL_UI_TEMPLATE,
+        message=message,
+        msg_class=msg_class,
+        history=recent,
+        page=page,
+        total_pages=total_pages,
+        total_count=total_count,
+        retention_days=HISTORY_DAYS
+    )
 
 
 @app.route('/health', methods=['GET'])
@@ -739,6 +816,41 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
 
   .empty    { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: center; padding: 16px 0; }
 
+  .pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+
+  .page-link {
+    color: var(--accent);
+    text-decoration: none;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .page-link:hover:not(.disabled) {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+  }
+
+  .page-link.disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .page-info {
+    color: var(--muted);
+  }
+
   a.logout {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
@@ -765,7 +877,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
   </header>
 
   <div class="card">
-    <div class="card-label">Trigger path scan - (Path needs to be the same as your root path in sonarr or radarr)</div>
+    <div class="card-label">Trigger path scan</div>
     <form method="post">
       <div class="input-row">
         <input type="text" name="path" placeholder="/mnt/media/tv/ShowName" autocomplete="off" spellcheck="false">
@@ -778,7 +890,12 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <div class="card-label">Recent syncs</div>
+    <div class="card-label">
+      Recent syncs
+      <span style="color: var(--muted); font-size: 9px; margin-left: 8px;">
+        ({{ total_count }} total, {{ retention_days }} day{{ 's' if retention_days != 1 else '' }} retention)
+      </span>
+    </div>
     {% if history %}
       {% for h in history %}
       <div class="history-item">
@@ -794,6 +911,24 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
         </div>
       </div>
       {% endfor %}
+      
+      {% if total_pages > 1 %}
+      <div class="pagination">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}" class="page-link">← Prev</a>
+        {% else %}
+        <span class="page-link disabled">← Prev</span>
+        {% endif %}
+        
+        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+        
+        {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}" class="page-link">Next →</a>
+        {% else %}
+        <span class="page-link disabled">Next →</span>
+        {% endif %}
+      </div>
+      {% endif %}
     {% else %}
       <p class="empty">No syncs yet.</p>
     {% endif %}
