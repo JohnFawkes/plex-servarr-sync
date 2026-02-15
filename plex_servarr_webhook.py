@@ -194,7 +194,7 @@ class SyncHistory:
         self._retention_days = retention_days
         self._lock = threading.Lock()
         self._init_db()
-    
+
     def _init_db(self):
         """Initialize database schema."""
         os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
@@ -213,7 +213,7 @@ class SyncHistory:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON sync_history(created_at DESC)")
             conn.commit()
-    
+
     def add(self, entry: dict):
         """Add a sync entry and prune old records."""
         with self._lock:
@@ -234,7 +234,7 @@ class SyncHistory:
                 # Prune old entries
                 conn.execute("DELETE FROM sync_history WHERE created_at < ?", (cutoff,))
                 conn.commit()
-    
+
     def get_recent(self, limit: int = 50, offset: int = 0) -> list:
         """Get recent entries with pagination."""
         with self._lock:
@@ -247,14 +247,14 @@ class SyncHistory:
                     LIMIT ? OFFSET ?
                 """, (limit, offset))
                 return [dict(row) for row in cursor.fetchall()]
-    
+
     def count(self) -> int:
         """Get total number of entries in retention window."""
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM sync_history")
                 return cursor.fetchone()[0]
-    
+
     def as_list(self) -> list:
         """For backward compatibility with old code."""
         return self.get_recent(limit=50)
@@ -457,7 +457,7 @@ def _find_plex_item(plex_instance, library, task: SyncTask):
         except Exception as exc:
             if "timeout" in str(exc).lower():
                 raise
-        
+
         # Fallback: title search + path match
         try:
             for res in library.search(title=clean_title):
@@ -601,11 +601,11 @@ def manual_webhook():
     page = max(1, int(request.args.get('page', 1)))
     per_page = 25
     offset = (page - 1) * per_page
-    
+
     recent = history.get_recent(limit=per_page, offset=offset)
     total_count = history.count()
     total_pages = (total_count + per_page - 1) // per_page  # ceiling division
-    
+
     return render_template_string(
         MANUAL_UI_TEMPLATE,
         message=message,
@@ -877,7 +877,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
   </header>
 
   <div class="card">
-    <div class="card-label">Trigger path scan</div>
+    <div class="card-label">Trigger path scan - (Path needs to be the same as your root path in sonarr or radarr)</div>
     <form method="post">
       <div class="input-row">
         <input type="text" name="path" placeholder="/mnt/media/tv/ShowName" autocomplete="off" spellcheck="false">
@@ -911,7 +911,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
         </div>
       </div>
       {% endfor %}
-      
+
       {% if total_pages > 1 %}
       <div class="pagination">
         {% if page > 1 %}
@@ -919,9 +919,9 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
         {% else %}
         <span class="page-link disabled">← Prev</span>
         {% endif %}
-        
+
         <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
-        
+
         {% if page < total_pages %}
         <a href="?page={{ page + 1 }}" class="page-link">Next →</a>
         {% else %}

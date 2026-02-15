@@ -1,9 +1,6 @@
 services:
   plex-servarr-sync:
-#    image: ghcr.io/johnfawkes/plex-servarr-sync:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/johnfawkes/plex-servarr-sync:latest
     container_name: plex-servarr-sync
     restart: unless-stopped
     env_file:
