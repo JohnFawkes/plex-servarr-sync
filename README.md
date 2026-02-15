@@ -1,11 +1,11 @@
-# plex-servarr-sync
+# Media Servarr Sync
 
 > ⚠️ **AI-Generated Project** — This project was built with the assistance of [Claude AI](https://claude.ai) by Anthropic. Review all code before running it in your environment.
 
 A lightweight webhook receiver that listens for **Sonarr** and **Radarr** events and triggers a targeted **partial Plex library scan** — no full library refreshes needed. Optionally integrates with **rclone VFS** to clear the cache before scanning (enable only if you use an rclone mount).
 
 ```
-Sonarr / Radarr  →  plex-servarr-sync  →  [rclone vfs/forget + vfs/refresh]  →  Plex partial scan
+Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]  →  Plex partial scan
                                                   (optional, USE_RCLONE=true)
 ```
 
@@ -35,8 +35,8 @@ Sonarr / Radarr  →  plex-servarr-sync  →  [rclone vfs/forget + vfs/refresh] 
 ### 1. Clone
 
 ```bash
-git clone https://github.com/johnfawkes/plex-servarr-sync.git
-cd plex-servarr-sync
+git clone https://github.com/youruser/media-servarr-sync.git
+cd media-servarr-sync
 ```
 
 ### 2. Configure
@@ -62,20 +62,20 @@ All configuration is done via environment variables (or a `.env` file in the pro
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PLEX_URL` | ✔️ | `http://127.0.0.1:32400` | URL of your Plex Media Server |
-| `PLEX_TOKEN` | ✔️ | — | Your Plex authentication token ([how to find it](https://support.plex.tv/articles/204059436)) |
+| `PLEX_URL` | ✔️  | `http://127.0.0.1:32400` | URL of your Plex Media Server |
+| `PLEX_TOKEN` | ✔️  | — | Your Plex authentication token ([how to find it](https://support.plex.tv/articles/204059436)) |
 | `PLEX_TIMEOUT` | | `60` | Plex API call timeout. Accepts same duration format as `WEBHOOK_DELAY` e.g. `60`, `2m` |
-| `PLEX_HEADER_IDENTIFIER` | | `plex-servarr-sync` | Stable client name sent to Plex — prevents a new device being registered on every container restart |
-| `TZ` | | `UTC` | | IANA timezone for log timestamps and sync history, e.g. `America/New_York`, `Europe/London` |
+| `PLEXAPI_HEADER_IDENTIFIER` | | `media-servarr-sync` | Stable client identifier sent to Plex — prevents a new device being registered on every container restart |
+| `TZ` | | `UTC` | IANA timezone for log timestamps and sync history, e.g. `America/New_York`, `Europe/London` |
 | `PORT` | | `5000` | Port the webhook receiver listens on |
-| `WEBHOOK_DELAY` | | `30` | Time to wait after receiving a webhook before acting. Accepts `30`, `30s`, `5m`, `1h`  |
+| `WEBHOOK_DELAY` | | `30` | Time to wait after receiving a webhook before acting. Accepts `30`, `30s`, `5m`, `1h` |
 | `MINIMUM_AGE` | | `0` | Minimum file age before scanning. Same format as `WEBHOOK_DELAY`. `0` disables |
 | `HISTORY_DAYS` | | `7` | Number of days to retain sync history. Older entries are auto-deleted. |
-| `SECTION_MAPPING` | ✔️ | `{}` | JSON map of path prefixes → Plex library section IDs |
+| `SECTION_MAPPING` | ✔️  | `{}` | JSON map of path prefixes → Plex library section IDs |
 | `PATH_REPLACEMENTS` | | `{}` | JSON map: Sonarr/Radarr path prefix → path as seen inside this container |
 | `MANUAL_USER` | | `admin` | Username for the manual trigger UI |
 | `MANUAL_PASS` | | `changeme` | Password for the manual trigger UI |
-| `SECRET_KEY` | ✔️ | `random` | Secret used to sign session cookies. Generate with `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `SECRET_KEY` | ✔️  | random | Secret used to sign session cookies. Generate with `python3 -c "import secrets; print(secrets.token_hex(32))"` |
 | `MEDIA_ROOT` | | `/mnt/media` | Host path mounted read-only for age checks (only needed if `MINIMUM_AGE > 0`) |
 
 ### Rclone settings
@@ -106,7 +106,7 @@ Set `USE_RCLONE=true` **only** if you serve your media through an rclone VFS mou
 
 These are JSON objects mapping path **prefixes**. Matching is case-insensitive and longest-prefix wins.
 
-**`PATH_REPLACEMENTS`** — translates paths from how Sonarr/Radarr report them to how they appear *inside the plex-servarr-sync container* (and therefore inside Plex):
+**`PATH_REPLACEMENTS`** — translates paths from how Sonarr/Radarr report them to how they appear *inside the media-servarr-sync container* (and therefore inside Plex):
 
 ```env
 PATH_REPLACEMENTS={ "/data/tv": "/mnt/media/tv", "/data/movies": "/mnt/media/movies" }
@@ -135,13 +135,13 @@ SECTION_MAPPING={ "/mnt/media/tv": "1", "/mnt/media/movies": "2" }
 ### Sonarr
 
 1. Go to **Settings → Connect → + (Add Connection) → Webhook**
-2. Set the URL to: `http://plex-servarr-sync:5000/webhook/sonarr`
+2. Set the URL to: `http://media-servarr-sync:5000/webhook/sonarr`
 3. Enable events: **On Import**, **On Upgrade**
 
 ### Radarr
 
 1. Go to **Settings → Connect → + (Add Connection) → Webhook**
-2. Set the URL to: `http://plex-servarr-sync:5000/webhook/radarr`
+2. Set the URL to: `http://media-servarr-sync:5000/webhook/radarr`
 3. Enable events: **On Import**, **On Upgrade**
 
 ---
@@ -213,8 +213,8 @@ networks:
     external: true
 
 services:
-  plex-servarr-sync:
-    image: ghcr.io/johnfawkes/plex-servarr-sync:latest
+  media-servarr-sync:
+    image: media-servarr-sync:latest
     networks:
       - media
     environment:
@@ -228,7 +228,7 @@ services:
 ## Building locally
 
 ```bash
-docker build -t plex-servarr-sync .
+docker build -t media-servarr-sync .
 ```
 
 ---
@@ -236,4 +236,3 @@ docker build -t plex-servarr-sync .
 ## License
 
 MIT
-	

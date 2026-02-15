@@ -1,6 +1,6 @@
 """
-plex-servarr-sync
------------------
+Media Servarr Sync
+------------------
 Webhook receiver for Sonarr & Radarr that triggers targeted Plex folder scans.
 
 Logic:
@@ -154,7 +154,7 @@ plexapi.TIMEOUT = PLEX_TIMEOUT
 
 # PlexAPI reads PLEXAPI_HEADER_IDENTIFIER from the environment automatically on import.
 # We set it explicitly here as well so it's always applied regardless of import order.
-PLEX_IDENTIFIER           = os.getenv("PLEXAPI_HEADER_IDENTIFIER", "plex-servarr-sync")
+PLEX_IDENTIFIER           = os.getenv("PLEXAPI_HEADER_IDENTIFIER", "media-servarr-sync")
 plexapi.X_PLEX_IDENTIFIER = PLEX_IDENTIFIER
 plexapi.X_PLEX_PRODUCT    = PLEX_IDENTIFIER
 
@@ -640,7 +640,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>plex-servarr-sync</title>
+<title>Media Servarr Sync</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
@@ -871,7 +871,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
 <div class="shell">
   <header>
     <div class="logo-dot"></div>
-    <h1>PLEX-SERVARR-SYNC</h1>
+    <h1>MEDIA SERVARR SYNC</h1>
     <span class="subtitle">Manual trigger</span>
     <a class="logout" href="/logout">Logout</a>
   </header>
@@ -942,7 +942,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>plex-servarr-sync · Login</title>
+<title>Media Servarr Sync · Login</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -1062,7 +1062,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html>
 <div class="card">
   <div class="logo">
     <div class="logo-dot"></div>
-    <h1>Plex-Servarr-Sync</h1>
+    <h1>Media Servarr Sync</h1>
   </div>
   {% if error %}
   <div class="error">{{ error }}</div>
@@ -1093,7 +1093,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
 
-    log.info("=== plex-servarr-sync starting ===")
+    log.info("=== Media Servarr Sync starting ===")
     log.info("Rclone integration: %s", "ENABLED" if USE_RCLONE else "DISABLED (set USE_RCLONE=true to enable)")
 
     worker_thread = threading.Thread(target=sync_worker, daemon=True, name="sync-worker")

@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── App source ────────────────────────────────────────────────────────────────
-COPY plex_servarr_webhook.py .
+COPY media_servarr_sync.py .
 
 # Create data directory for persistent storage
 RUN mkdir -p /data && chown appuser:appuser /data
@@ -37,4 +37,4 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD /bin/sh -c 'curl -sf http://localhost:${PORT:-5000}/health || exit 1'
 
-ENTRYPOINT ["python", "plex_servarr_webhook.py"]
+ENTRYPOINT ["python", "media_servarr_sync.py"]
