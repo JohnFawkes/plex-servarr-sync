@@ -243,24 +243,43 @@ class SyncHistory:
                 conn.execute("DELETE FROM sync_history WHERE created_at < ?", (cutoff,))
                 conn.commit()
 
-    def get_recent(self, limit: int = 50, offset: int = 0) -> list:
-        """Get recent entries with pagination."""
+    def get_recent(self, limit: int = 50, offset: int = 0,
+                   search: str = "", status_filter: str = "") -> list:
+        """Get recent entries with optional path search and status filter."""
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                cursor = conn.execute("""
+                conditions, params = [], []
+                if search:
+                    conditions.append("path LIKE ?")
+                    params.append(f"%{search}%")
+                if status_filter:
+                    conditions.append("status = ?")
+                    params.append(status_filter)
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                params.extend([limit, offset])
+                cursor = conn.execute(f"""
                     SELECT ts, label, path, status, error, duration_s, episode
                     FROM sync_history
+                    {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
-                """, (limit, offset))
+                """, params)
                 return [dict(row) for row in cursor.fetchall()]
 
-    def count(self) -> int:
-        """Get total number of entries in retention window."""
+    def count(self, search: str = "", status_filter: str = "") -> int:
+        """Get total number of entries matching optional search and status filter."""
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
-                cursor = conn.execute("SELECT COUNT(*) FROM sync_history")
+                conditions, params = [], []
+                if search:
+                    conditions.append("path LIKE ?")
+                    params.append(f"%{search}%")
+                if status_filter:
+                    conditions.append("status = ?")
+                    params.append(status_filter)
+                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                cursor = conn.execute(f"SELECT COUNT(*) FROM sync_history {where}", params)
                 return cursor.fetchone()[0]
 
     def as_list(self) -> list:
@@ -536,28 +555,68 @@ def _find_plex_item(plex_instance, library, task: SyncTask):
 # ---------------------------------------------------------------------------
 
 def _merge_episode_counts(existing: str, incoming: str) -> str:
-    """Accumulate episode counts when duplicate webhooks arrive for the same folder."""
-    def _count(ep: str) -> int:
-        if not ep:
-            return 0
-        parts = ep.split()
-        if len(parts) == 2 and parts[1] in ('episode', 'episodes') and parts[0].isdigit():
-            return int(parts[0])
-        return 1  # treat a filename as a single episode
+    """Accumulate episode info when duplicate webhooks arrive for the same folder.
 
-    def _ep_key(ep: str) -> str | None:
-        """Return a normalised SxxExx key if the string contains one, else None."""
+    When individual filenames are known, stores as a JSON list so the UI can
+    render a hover tooltip. Falls back to a plain count string for older records
+    that only carry a count.
+    """
+    def _to_list(ep: str) -> tuple:
+        if not ep:
+            return [], 0
+        try:
+            parsed = json.loads(ep)
+            if isinstance(parsed, list):
+                return parsed, len(parsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        m = re.match(r'^(\d+) episodes?$', ep.strip())
+        if m:
+            return [], int(m.group(1))
+        return [ep], 1  # single filename
+
+    def _ep_key(ep: str):
         m = re.search(r'[Ss](\d+)[Ee](\d+)', ep)
         return f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}" if m else None
 
-    # If both strings name the same episode (e.g. import then rename), don't double-count.
-    if _ep_key(existing) and _ep_key(existing) == _ep_key(incoming):
-        return existing
+    existing_names, existing_count = _to_list(existing)
+    incoming_names, incoming_count = _to_list(incoming)
 
-    total = _count(existing) + _count(incoming)
-    if total > 1:
-        return f"{total} episodes"
-    return existing or incoming
+    if existing_names or incoming_names:
+        seen_keys = {_ep_key(ep) for ep in existing_names}
+        merged = list(existing_names)
+        for ep in incoming_names:
+            k = _ep_key(ep)
+            if k is None or k not in seen_keys:
+                merged.append(ep)
+                if k:
+                    seen_keys.add(k)
+        if len(merged) == 1:
+            return merged[0]
+        return json.dumps(merged)
+
+    # Both sides are count-only — no filenames to recover
+    total = existing_count + incoming_count
+    return f"{total} episodes" if total != 1 else (existing or incoming)
+
+
+def _parse_episode_field(ep_str: str) -> tuple:
+    """Parse a stored episode field into (display_str, episode_list).
+
+    episode_list is non-empty only when individual filenames are known,
+    which enables the hover tooltip in the UI.
+    """
+    if not ep_str:
+        return "", []
+    try:
+        parsed = json.loads(ep_str)
+        if isinstance(parsed, list) and parsed:
+            if len(parsed) == 1:
+                return parsed[0], []
+            return f"{len(parsed)} episodes", parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return ep_str, []
 
 
 def enqueue_sync(raw_path: str, label: str, episode: str = ""):
@@ -639,31 +698,34 @@ def process_webhook(data: dict, instance_type: str):
         #   episodeFile        — single episode download/delete
         #   episodeFiles       — batch/season-pack download
         #   renamedEpisodeFiles — rename events
-        relative_path = ""
-        extra_count = 0
+        episode_files = []
 
         ef = data.get('episodeFile', {})
         if ef:
-            relative_path = ef.get('relativePath', '')
+            rp = ef.get('relativePath', '')
+            if rp:
+                episode_files = [rp.replace('\\', '/').split('/')[-1]]
 
-        if not relative_path:
+        if not episode_files:
             efs = data.get('episodeFiles', [])
             if efs:
-                relative_path = efs[0].get('relativePath', '')
-                extra_count = len(efs) - 1
+                episode_files = [
+                    f.get('relativePath', '').replace('\\', '/').split('/')[-1]
+                    for f in efs if f.get('relativePath')
+                ]
 
-        if not relative_path:
+        if not episode_files:
             refs = data.get('renamedEpisodeFiles', [])
             if refs:
-                relative_path = refs[0].get('relativePath', '')
-                extra_count = len(refs) - 1
+                episode_files = [
+                    f.get('relativePath', '').replace('\\', '/').split('/')[-1]
+                    for f in refs if f.get('relativePath')
+                ]
 
-        if relative_path:
-            total = extra_count + 1
-            if total > 1:
-                episode = f"{total} episodes"
-            else:
-                episode = relative_path.replace('\\', '/').split('/')[-1]
+        if len(episode_files) == 1:
+            episode = episode_files[0]
+        elif len(episode_files) > 1:
+            episode = json.dumps(episode_files)
 
     result, status = enqueue_sync(raw_path, label, episode=episode)
     return jsonify(result), status
@@ -728,14 +790,28 @@ def manual_webhook():
             message = "✗ No path provided."
             msg_class = "error"
 
+    # Filters
+    search_q = request.args.get('q', '').strip()
+    status_filter = request.args.get('status', '').strip()
+    if status_filter not in ('ok', 'error', ''):
+        status_filter = ''
+
     # Pagination
     page = max(1, int(request.args.get('page', 1)))
     per_page = 25
     offset = (page - 1) * per_page
 
-    recent = history.get_recent(limit=per_page, offset=offset)
-    total_count = history.count()
-    total_pages = (total_count + per_page - 1) // per_page  # ceiling division
+    recent = history.get_recent(limit=per_page, offset=offset, search=search_q, status_filter=status_filter)
+    total_count = history.count(search=search_q, status_filter=status_filter)
+    total_pages = (total_count + per_page - 1) // per_page
+
+    for item in recent:
+        display, ep_list = _parse_episode_field(item.get('episode', ''))
+        item['episode_display'] = display
+        item['episode_list'] = ep_list
+
+    search_qs = urllib.parse.urlencode([('q', search_q)])
+    filter_qs  = urllib.parse.urlencode([('q', search_q), ('status', status_filter)])
 
     return render_template_string(
         MANUAL_UI_TEMPLATE,
@@ -745,7 +821,11 @@ def manual_webhook():
         page=page,
         total_pages=total_pages,
         total_count=total_count,
-        retention_days=HISTORY_DAYS
+        retention_days=HISTORY_DAYS,
+        search_q=search_q,
+        status_filter=status_filter,
+        search_qs=search_qs,
+        filter_qs=filter_qs,
     )
 
 
@@ -985,7 +1065,49 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
 
   .h-path    { color: var(--text); word-break: break-all; }
   .h-episode { color: var(--muted); font-size: 11px; margin-top: 2px; word-break: break-all; }
-  .episode-count-badge { display: inline-block; margin-top: 3px; padding: 1px 7px; background: var(--accent); color: var(--bg); border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+  .episode-count-badge { display: inline-block; margin-top: 3px; padding: 1px 7px; background: var(--accent); color: var(--bg); border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; cursor: default; }
+
+  .ep-wrap { position: relative; display: inline-block; }
+  .ep-tooltip {
+    display: none;
+    position: absolute;
+    left: 0; top: calc(100% + 4px);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    min-width: 220px; max-width: 460px;
+    z-index: 50;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+  .ep-wrap:hover .ep-tooltip { display: block; }
+  .ep-tip-row {
+    font-size: 10px; color: var(--text);
+    padding: 3px 0; border-bottom: 1px solid var(--border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ep-tip-row:last-child { border-bottom: none; }
+
+  .filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .filter-search {
+    flex: 1; min-width: 0;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 7px 12px; outline: none; transition: border-color 0.15s;
+  }
+  .filter-search:focus { border-color: var(--accent); }
+  .filter-search::placeholder { color: var(--muted); }
+  .status-pills { display: flex; gap: 4px; flex-shrink: 0; }
+  .pill {
+    padding: 5px 10px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted); text-decoration: none; transition: all 0.15s; white-space: nowrap;
+  }
+  .pill:hover { border-color: var(--text); color: var(--text); }
+  .pill.active          { border-color: var(--accent);  color: var(--accent);  background: var(--accent-dim); }
+  .pill.pill-ok.active  { border-color: var(--success); color: var(--success); background: rgba(74,222,128,0.08); }
+  .pill.pill-err.active { border-color: var(--error);   color: var(--error);   background: rgba(248,113,113,0.08); }
   .h-meta    { color: var(--muted); text-align: right; white-space: nowrap; }
   .h-label   { color: var(--accent); font-size: 10px; }
   .h-error   { color: var(--error); font-size: 10px; margin-top: 2px; }
@@ -1077,18 +1199,45 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
         ({{ total_count }} total, {{ retention_days }} day{{ 's' if retention_days != 1 else '' }} retention)
       </span>
     </div>
+    <div class="filter-bar">
+      <form method="get" style="display:contents">
+        <input type="hidden" name="status" value="{{ status_filter }}">
+        <input class="filter-search" type="text" name="q" id="search-input"
+               value="{{ search_q }}" placeholder="Search by path…"
+               autocomplete="off" spellcheck="false">
+      </form>
+      <div class="status-pills">
+        <a href="?{{ search_qs | safe }}&status=&page=1"
+           class="pill{{ ' active' if not status_filter else '' }}">All</a>
+        <a href="?{{ search_qs | safe }}&status=ok&page=1"
+           class="pill pill-ok{{ ' active' if status_filter == 'ok' else '' }}">OK</a>
+        <a href="?{{ search_qs | safe }}&status=error&page=1"
+           class="pill pill-err{{ ' active' if status_filter == 'error' else '' }}">Failed</a>
+      </div>
+    </div>
     {% if history %}
       {% for h in history %}
       <div class="history-item">
         <div class="status-dot {{ 'dot-ok' if h.status == 'ok' else 'dot-error' }}"></div>
         <div>
           <span class="h-path">{{ h.path }}</span>
-          {% if h.episode %}
-            {% set ep_words = h.episode.split() %}
-            {% if ep_words|length == 2 and ep_words[1] in ['episode', 'episodes'] %}
-            <div><span class="episode-count-badge">{{ h.episode }}</span></div>
+          {% if h.episode_display %}
+            {% if h.episode_list %}
+            <div>
+              <div class="ep-wrap">
+                <span class="episode-count-badge">{{ h.episode_display }}</span>
+                <div class="ep-tooltip">
+                  {% for ep in h.episode_list %}<div class="ep-tip-row">{{ ep }}</div>{% endfor %}
+                </div>
+              </div>
+            </div>
             {% else %}
-            <div class="h-episode">{{ h.episode }}</div>
+              {% set ep_words = h.episode_display.split() %}
+              {% if ep_words|length == 2 and ep_words[1] in ['episode', 'episodes'] %}
+              <div><span class="episode-count-badge">{{ h.episode_display }}</span></div>
+              {% else %}
+              <div class="h-episode">{{ h.episode_display }}</div>
+              {% endif %}
             {% endif %}
           {% endif %}
           <div class="h-label">{{ h.label }} &nbsp;·&nbsp; {{ h.duration_s }}s</div>
@@ -1104,7 +1253,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
       {% if total_pages > 1 %}
       <div class="pagination">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}" class="page-link">← Prev</a>
+        <a href="?{{ filter_qs | safe }}&page={{ page - 1 }}" class="page-link">← Prev</a>
         {% else %}
         <span class="page-link disabled">← Prev</span>
         {% endif %}
@@ -1112,17 +1261,28 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
         <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
 
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}" class="page-link">Next →</a>
+        <a href="?{{ filter_qs | safe }}&page={{ page + 1 }}" class="page-link">Next →</a>
         {% else %}
         <span class="page-link disabled">Next →</span>
         {% endif %}
       </div>
       {% endif %}
     {% else %}
-      <p class="empty">No syncs yet.</p>
+      <p class="empty">No syncs yet{% if search_q or status_filter %} matching filters{% endif %}.</p>
     {% endif %}
   </div>
 </div>
+<script>
+(function(){
+  var si = document.getElementById('search-input');
+  if (!si) return;
+  var t;
+  si.addEventListener('input', function(){
+    clearTimeout(t);
+    t = setTimeout(function(){ si.form.submit(); }, 400);
+  });
+})();
+</script>
 </body>
 </html>'''
 
