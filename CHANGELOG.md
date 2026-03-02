@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.2.0] - 2026-03-02
+
+### Added
+- **Stats API** — new unauthenticated `GET /api/stats` endpoint returning aggregate sync counts (total, ok, failed, sonarr, radarr, manual), average duration, queue depth, in-flight count, worker status, and last sync info. Designed for the [Homepage](https://gethomepage.dev) `customapi` widget; widget YAML snippet included in the endpoint docstring
+- **Episode hover tooltip** — when multiple episodes are merged into a single sync record the episode-count badge (e.g. `5 episodes`) now shows a dropdown tooltip on hover listing every individual filename. Tooltip only appears when filenames are known (new-format records); old count-only records display the badge without a tooltip
+- **History search bar** — text field above the sync history list that filters by path using a server-side SQL `LIKE` query so results span all pages, not just the currently visible page. Debounced auto-submit fires 400 ms after the user stops typing
+- **History status filter** — **All / OK / Failed** pill buttons filter the history list by status. Active pill is highlighted in the matching colour (amber / green / red). Search text and status filter are preserved across pagination and when switching between filter tabs
+
+### Changed
+- Episode data for batch Sonarr imports is now stored as a JSON list of filenames (e.g. `["S01E01.mkv","S01E02.mkv"]`) instead of a plain count string. Enables the hover tooltip. Single-episode records continue to store a plain filename string. Old count-only records (`"N episodes"`) are handled transparently
+- `_merge_episode_counts` updated to merge JSON filename lists and dedup by normalised SxxExx key; falls back to additive count for legacy records that carry no filenames
+
+---
+
 ## [v0.1.2]
 
 ### Added

@@ -24,9 +24,10 @@ Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]
 - **Minimum file age** — optionally hold off scanning until a file is at least N seconds old
 - **Retry on timeout** — Plex scan attempts retry up to 3 times with automatic reconnection on stale sessions
 - **Health endpoint** — `/health` exposes queue depth, Plex connectivity, rclone mode, and recent sync history
+- **Stats API** — `/api/stats` returns aggregate sync counts, queue state, and last sync info — ready for [Homepage](https://gethomepage.dev) `customapi` widget
 - **Manual trigger UI** — password-protected web UI at `/` for ad-hoc scans
-- **Sync history** — last 50 sync results (path, status, duration, errors) visible in the UI and health endpoint
-- **Episode display** — for Sonarr events, the episode filename (e.g. `Show.S01E01.mkv`) is shown beneath the season folder path in the sync history UI
+- **Sync history** — paginated sync results (path, status, duration, errors) with server-side path search and status filter (All / OK / Failed)
+- **Episode display** — for Sonarr events, the episode filename (e.g. `Show.S01E01.mkv`) is shown beneath the season folder path; batch imports show an episode-count badge that reveals individual filenames on hover
 
 ---
 
@@ -160,8 +161,9 @@ SECTION_MAPPING={ "/mnt/media/tv": "1", "/mnt/media/movies": "2" }
 |---|---|---|---|
 | `/webhook/sonarr` | POST | None | Sonarr webhook receiver |
 | `/webhook/radarr` | POST | None | Radarr webhook receiver |
-| `/` | GET / POST | Basic | Manual sync trigger UI |
-| `/health` | GET | None | JSON health + recent history |
+| `/` | GET / POST | Session | Manual sync trigger UI + history |
+| `/health` | GET | None | JSON health check + recent history |
+| `/api/stats` | GET | None | Aggregate sync stats for dashboards |
 
 ### Health response example
 
@@ -183,6 +185,59 @@ SECTION_MAPPING={ "/mnt/media/tv": "1", "/mnt/media/movies": "2" }
     }
   ]
 }
+```
+
+### Stats API (`/api/stats`)
+
+Returns aggregate statistics suitable for a Homepage `customapi` widget.
+
+```json
+{
+  "syncs": {
+    "total": 142,
+    "ok": 139,
+    "failed": 3,
+    "sonarr": 98,
+    "radarr": 41,
+    "manual": 3,
+    "avg_duration_s": 18.4
+  },
+  "queue": { "depth": 0, "in_flight": 0 },
+  "worker": { "alive": true },
+  "last_sync": {
+    "at": "2026-03-02T14:22:01+00:00",
+    "status": "ok",
+    "label": "SONARR",
+    "path": "/mnt/media/tv/Breaking Bad/"
+  },
+  "retention_days": 7
+}
+```
+
+Counts reflect the current `HISTORY_DAYS` retention window.
+
+#### Homepage widget config
+
+```yaml
+- Media Servarr Sync:
+    href: http://media-servarr-sync:5000
+    widget:
+      type: customapi
+      url: http://media-servarr-sync:5000/api/stats
+      refreshInterval: 30000
+      mappings:
+        - field: syncs.total
+          label: Total Syncs
+          format: number
+        - field: syncs.ok
+          label: Successful
+          format: number
+        - field: syncs.failed
+          label: Failed
+          format: number
+        - field: queue.depth
+          label: Queued
+          format: number
 ```
 
 ---
