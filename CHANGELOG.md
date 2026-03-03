@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- Sonarr upgrade events (and standalone file-delete events) no longer record the **old** episode filename in sync history. Sonarr's `EpisodeFileDeleted` webhook payload carries an `episodeFile` key that points to the *deleted* file; if that event was processed first it would write the old filename to history and potentially lock the folder in the cooldown window before the `Download` event arrived with the new file. `EpisodeFileDeleted`, `SeriesDelete`, `MovieFileDeleted`, `MovieDelete`, and `Grab` events are now silently skipped — the `Download` event that follows an upgrade is sufficient to trigger the scan with the correct new filename.
+
+---
+
 ## [v0.2.0] - 2026-03-02
 
 ### Added

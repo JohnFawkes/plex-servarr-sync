@@ -682,8 +682,25 @@ def process_webhook(data: dict, instance_type: str):
         return jsonify({"error": "No payload"}), 400
 
     event = data.get('eventType', '')
+
     if event == "Test":
         return jsonify({"status": "test_success"}), 200
+
+    # Skip events where no useful scan can be performed:
+    #   Grab              — file is queued in the download client, not on disk yet
+    #   EpisodeFileDeleted / MovieFileDeleted — the deleted file's path ends up in
+    #                       `episodeFile`, which would record the OLD filename in
+    #                       history; upgrades are covered by the subsequent Download event
+    #   SeriesDelete / MovieDelete — entire series/movie removed; Plex scheduled scans
+    #                       will eventually catch this, a targeted partial scan won't help
+    _SKIP = {
+        'Grab',
+        'EpisodeFileDeleted', 'SeriesDelete',   # Sonarr
+        'MovieFileDeleted',   'MovieDelete',     # Radarr
+    }
+    if event in _SKIP:
+        log.debug("[%s] Skipping event type '%s'", instance_type.upper(), event)
+        return jsonify({"status": "skipped", "reason": f"event type '{event}' not handled"}), 200
 
     label = instance_type.upper()
     raw_path = ""
