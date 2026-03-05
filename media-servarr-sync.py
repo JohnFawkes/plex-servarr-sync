@@ -180,6 +180,8 @@ class SyncTask:
     mapped_folder: str
     label: str
     episode: str = ""
+    quality: str = ""
+    custom_formats: str = ""   # JSON-encoded list of format name strings
     queued_at: float = field(default_factory=time.monotonic)
 
     def __eq__(self, other):
@@ -215,10 +217,14 @@ class SyncHistory:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON sync_history(created_at DESC)")
-            # Migrate existing databases that lack the episode column
+            # Migrate existing databases that lack newer columns
             existing = {row[1] for row in conn.execute("PRAGMA table_info(sync_history)")}
             if 'episode' not in existing:
                 conn.execute("ALTER TABLE sync_history ADD COLUMN episode TEXT")
+            if 'quality' not in existing:
+                conn.execute("ALTER TABLE sync_history ADD COLUMN quality TEXT DEFAULT ''")
+            if 'custom_formats' not in existing:
+                conn.execute("ALTER TABLE sync_history ADD COLUMN custom_formats TEXT DEFAULT ''")
             conn.commit()
 
     def add(self, entry: dict):
@@ -227,8 +233,9 @@ class SyncHistory:
             cutoff = time.time() - (self._retention_days * 86400)
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute("""
-                    INSERT INTO sync_history (ts, label, path, status, error, duration_s, created_at, episode)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO sync_history
+                        (ts, label, path, status, error, duration_s, created_at, episode, quality, custom_formats)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry['ts'],
                     entry['label'],
@@ -238,6 +245,8 @@ class SyncHistory:
                     entry['duration_s'],
                     time.time(),
                     entry.get('episode', ''),
+                    entry.get('quality', ''),
+                    entry.get('custom_formats', ''),
                 ))
                 # Prune old entries
                 conn.execute("DELETE FROM sync_history WHERE created_at < ?", (cutoff,))
@@ -259,7 +268,7 @@ class SyncHistory:
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 params.extend([limit, offset])
                 cursor = conn.execute(f"""
-                    SELECT ts, label, path, status, error, duration_s, episode
+                    SELECT ts, label, path, status, error, duration_s, episode, quality, custom_formats
                     FROM sync_history
                     {where}
                     ORDER BY created_at DESC
@@ -510,6 +519,8 @@ def sync_worker():
                 "error": error_msg,
                 "duration_s": duration,
                 "episode": task.episode,
+                "quality": task.quality,
+                "custom_formats": task.custom_formats,
             })
             sync_queue.task_done()
 
@@ -619,7 +630,52 @@ def _parse_episode_field(ep_str: str) -> tuple:
     return ep_str, []
 
 
-def enqueue_sync(raw_path: str, label: str, episode: str = ""):
+def _extract_file_meta(file_obj: dict) -> tuple:
+    """Return (quality_name, custom_format_names) from an episodeFile / movieFile dict.
+
+    quality_name       — e.g. "WEBDL-1080p" from file_obj.quality.quality.name
+    custom_format_names — list of strings from file_obj.customFormats[].name
+    """
+    quality = ""
+    q = file_obj.get('quality', {})
+    if isinstance(q, dict):
+        inner = q.get('quality', {})
+        if isinstance(inner, dict):
+            quality = inner.get('name', '') or ''
+
+    formats = []
+    for cf in file_obj.get('customFormats', []):
+        name = cf.get('name', '') if isinstance(cf, dict) else ''
+        if name:
+            formats.append(name)
+
+    return quality, formats
+
+
+def _merge_custom_formats(existing: str, incoming: str) -> str:
+    """Union two JSON-encoded custom-format name lists, preserving order."""
+    def _to_list(s: str) -> list:
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [x for x in parsed if isinstance(x, str)]
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return []
+
+    merged = list(_to_list(existing))
+    seen = set(merged)
+    for fmt in _to_list(incoming):
+        if fmt not in seen:
+            merged.append(fmt)
+            seen.add(fmt)
+    return json.dumps(merged) if merged else ""
+
+
+def enqueue_sync(raw_path: str, label: str, episode: str = "",
+                 quality: str = "", custom_formats: str = ""):
     """Validate, map, and enqueue a sync task. Returns (response_dict, http_status)."""
     if not raw_path:
         return {"status": "skipped", "reason": "empty path"}, 200
@@ -648,6 +704,8 @@ def enqueue_sync(raw_path: str, label: str, episode: str = ""):
         mapped_folder=mapped_folder,
         label=label,
         episode=episode,
+        quality=quality,
+        custom_formats=custom_formats,
     )
 
     # Deduplication: if same folder already queued or in cooldown, skip re-queuing
@@ -661,6 +719,13 @@ def enqueue_sync(raw_path: str, label: str, episode: str = ""):
                          label, mapped_folder, merged)
             else:
                 log.info("[%s] [DEDUP] Already queued: %s", label, mapped_folder)
+            # Quality: keep first non-empty value
+            if not existing_task.quality and quality:
+                existing_task.quality = quality
+            # Custom formats: union
+            if custom_formats:
+                existing_task.custom_formats = _merge_custom_formats(
+                    existing_task.custom_formats, custom_formats)
             return {"status": "deduplicated"}, 200
 
         if SYNC_COOLDOWN > 0:
@@ -699,29 +764,54 @@ def process_webhook(data: dict, instance_type: str):
         'MovieFileDeleted',   'MovieDelete',     # Radarr
     }
     if event in _SKIP:
-        log.debug("[%s] Skipping event type '%s'", instance_type.upper(), event)
+        log.info("[%s] Skipping event type '%s' (no scan needed)", instance_type.upper(), event)
         return jsonify({"status": "skipped", "reason": f"event type '{event}' not handled"}), 200
 
     label = instance_type.upper()
     raw_path = ""
     episode = ""
+    quality = ""
+    custom_formats_list: list = []
+
     if 'movie' in data:
         raw_path = data['movie'].get('folderPath', '')
+        mf = data.get('movieFile', {})
+        if mf:
+            quality, custom_formats_list = _extract_file_meta(mf)
+
     elif 'series' in data:
         series_path = data['series'].get('path', '')
         raw_path = series_path  # always scan the show root, never the season subfolder
 
         # Sonarr uses different keys depending on event type:
-        #   episodeFile        — single episode download/delete
-        #   episodeFiles       — batch/season-pack download
+        #   episodeFile         — single episode download/delete
+        #   episodeFiles        — batch/season-pack download
         #   renamedEpisodeFiles — rename events
         episode_files = []
+
+        # Build the set of OLD filenames being replaced so we can discard stale episode info.
+        # On upgrade events Sonarr populates `deletedFiles` with the file(s) that were replaced.
+        # In some Sonarr versions the `episodeFile` field in the Download webhook can transiently
+        # point to the old file before the rename completes; filtering against deletedFiles guards
+        # against recording the replaced filename in sync history.
+        _deleted_filenames: set = set()
+        if data.get('isUpgrade'):
+            for df in data.get('deletedFiles', []):
+                dfn = df.get('relativePath', '').replace('\\', '/').split('/')[-1]
+                if dfn:
+                    _deleted_filenames.add(dfn)
 
         ef = data.get('episodeFile', {})
         if ef:
             rp = ef.get('relativePath', '')
             if rp:
-                episode_files = [rp.replace('\\', '/').split('/')[-1]]
+                fn = rp.replace('\\', '/').split('/')[-1]
+                if fn not in _deleted_filenames:
+                    episode_files = [fn]
+                    quality, custom_formats_list = _extract_file_meta(ef)
+                else:
+                    log.info("[%s] episodeFile '%s' matches a deletedFile — discarding stale episode info",
+                             label, fn)
 
         if not episode_files:
             efs = data.get('episodeFiles', [])
@@ -730,6 +820,14 @@ def process_webhook(data: dict, instance_type: str):
                     f.get('relativePath', '').replace('\\', '/').split('/')[-1]
                     for f in efs if f.get('relativePath')
                 ]
+                # Quality from first file; custom formats unioned across all files
+                if efs:
+                    quality, custom_formats_list = _extract_file_meta(efs[0])
+                    for f in efs[1:]:
+                        _, extra = _extract_file_meta(f)
+                        for fmt in extra:
+                            if fmt not in custom_formats_list:
+                                custom_formats_list.append(fmt)
 
         if not episode_files:
             refs = data.get('renamedEpisodeFiles', [])
@@ -738,13 +836,22 @@ def process_webhook(data: dict, instance_type: str):
                     f.get('relativePath', '').replace('\\', '/').split('/')[-1]
                     for f in refs if f.get('relativePath')
                 ]
+                if refs:
+                    quality, custom_formats_list = _extract_file_meta(refs[0])
+                    for f in refs[1:]:
+                        _, extra = _extract_file_meta(f)
+                        for fmt in extra:
+                            if fmt not in custom_formats_list:
+                                custom_formats_list.append(fmt)
 
         if len(episode_files) == 1:
             episode = episode_files[0]
         elif len(episode_files) > 1:
             episode = json.dumps(episode_files)
 
-    result, status = enqueue_sync(raw_path, label, episode=episode)
+    custom_formats = json.dumps(custom_formats_list) if custom_formats_list else ""
+    result, status = enqueue_sync(raw_path, label, episode=episode,
+                                  quality=quality, custom_formats=custom_formats)
     return jsonify(result), status
 
 
@@ -826,6 +933,11 @@ def manual_webhook():
         display, ep_list = _parse_episode_field(item.get('episode', ''))
         item['episode_display'] = display
         item['episode_list'] = ep_list
+        cf_raw = item.get('custom_formats', '') or ''
+        try:
+            item['custom_format_list'] = json.loads(cf_raw) if cf_raw else []
+        except (json.JSONDecodeError, ValueError):
+            item['custom_format_list'] = []
 
     search_qs = urllib.parse.urlencode([('q', search_q)])
     filter_qs  = urllib.parse.urlencode([('q', search_q), ('status', status_filter)])
@@ -1181,6 +1293,20 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     transition: color 0.15s, border-color 0.15s;
   }
   a.logout:hover { color: var(--error); border-color: var(--error); }
+
+  .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .tag {
+    display: inline-block; padding: 1px 6px;
+    border-radius: 3px; font-size: 10px; font-weight: 500; letter-spacing: 0.03em;
+  }
+  .tag-quality {
+    background: rgba(96,165,250,0.13); color: #60a5fa;
+    border: 1px solid rgba(96,165,250,0.3);
+  }
+  .tag-cf {
+    background: rgba(167,139,250,0.12); color: #a78bfa;
+    border: 1px solid rgba(167,139,250,0.25);
+  }
 </style>
 </head>
 <body>
@@ -1256,6 +1382,12 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
               <div class="h-episode">{{ h.episode_display }}</div>
               {% endif %}
             {% endif %}
+          {% endif %}
+          {% if h.quality or h.custom_format_list %}
+          <div class="tag-row">
+            {% if h.quality %}<span class="tag tag-quality">{{ h.quality }}</span>{% endif %}
+            {% for cf in h.custom_format_list %}<span class="tag tag-cf">{{ cf }}</span>{% endfor %}
+          </div>
           {% endif %}
           <div class="h-label">{{ h.label }} &nbsp;·&nbsp; {{ h.duration_s }}s</div>
           {% if h.error %}<div class="h-error">{{ h.error }}</div>{% endif %}

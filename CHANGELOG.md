@@ -8,8 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Quality and custom-format tags** — each sync history entry now captures the file quality (e.g. `WEBDL-1080p`) and custom format names (e.g. `Uncensored`, `JA+EN Audio`) from the Sonarr/Radarr webhook payload and displays them as colour-coded inline tags beneath the episode info. Quality tags are shown in blue; custom-format tags in purple. Works for single downloads, batch/season-pack imports, rename events, and Radarr movies.
+
 ### Fixed
-- Sonarr upgrade events (and standalone file-delete events) no longer record the **old** episode filename in sync history. Sonarr's `EpisodeFileDeleted` webhook payload carries an `episodeFile` key that points to the *deleted* file; if that event was processed first it would write the old filename to history and potentially lock the folder in the cooldown window before the `Download` event arrived with the new file. `EpisodeFileDeleted`, `SeriesDelete`, `MovieFileDeleted`, `MovieDelete`, and `Grab` events are now silently skipped — the `Download` event that follows an upgrade is sufficient to trigger the scan with the correct new filename.
+- Sonarr upgrade events (and standalone file-delete events) no longer record the **old** episode filename in sync history. `EpisodeFileDeleted`, `SeriesDelete`, `MovieFileDeleted`, `MovieDelete`, and `Grab` events are now silently skipped — the `Download` event that follows an upgrade is sufficient to trigger the scan with the correct new filename.
+- Additional guard for Sonarr `Download` events with `isUpgrade: true`: if the `episodeFile` field transiently references one of the files listed in `deletedFiles` (the files being replaced), that stale filename is discarded rather than written to history. This covers the edge case where Sonarr fires the upgrade `Download` webhook before its internal rename has completed.
 
 ---
 
