@@ -1294,6 +1294,15 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
   }
   a.logout:hover { color: var(--error); border-color: var(--error); }
 
+  .refresh-btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted); font-size: 14px; line-height: 1; padding: 2px 7px;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .refresh-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .refresh-btn.spinning { animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .tag {
     display: inline-block; padding: 1px 6px;
@@ -1336,10 +1345,14 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
   </div>
 
   <div class="card">
-    <div class="card-label">
+    <div class="card-label" style="display:flex;align-items:center;gap:6px;">
       Recent syncs
-      <span style="color: var(--muted); font-size: 9px; margin-left: 8px;">
+      <span id="total-count" style="color: var(--muted); font-size: 9px;">
         ({{ total_count }} total, {{ retention_days }} day{{ 's' if retention_days != 1 else '' }} retention)
+      </span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="refresh-countdown" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:0.05em;">30s</span>
+        <button type="button" id="refresh-btn" class="refresh-btn" title="Refresh now">↻</button>
       </span>
     </div>
     <div class="filter-bar">
@@ -1358,6 +1371,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
            class="pill pill-err{{ ' active' if status_filter == 'error' else '' }}">Failed</a>
       </div>
     </div>
+    <div id="history-body">
     {% if history %}
       {% for h in history %}
       <div class="history-item">
@@ -1419,17 +1433,71 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     {% else %}
       <p class="empty">No syncs yet{% if search_q or status_filter %} matching filters{% endif %}.</p>
     {% endif %}
+    </div>{# /history-body #}
   </div>
 </div>
 <script>
 (function(){
+  /* ---------- search debounce ---------- */
   var si = document.getElementById('search-input');
-  if (!si) return;
-  var t;
-  si.addEventListener('input', function(){
-    clearTimeout(t);
-    t = setTimeout(function(){ si.form.submit(); }, 400);
-  });
+  if (si) {
+    var dt;
+    si.addEventListener('input', function(){
+      clearTimeout(dt);
+      dt = setTimeout(function(){ si.form.submit(); }, 400);
+    });
+  }
+
+  /* ---------- auto-refresh ---------- */
+  var INTERVAL = 30;
+  var remaining = INTERVAL;
+  var tick;
+
+  var countdownEl = document.getElementById('refresh-countdown');
+  var btn         = document.getElementById('refresh-btn');
+
+  function setCountdown(n) {
+    if (countdownEl) countdownEl.textContent = n + 's';
+  }
+
+  async function doRefresh() {
+    clearInterval(tick);
+    if (btn) btn.classList.add('spinning');
+    try {
+      var res = await fetch(window.location.href, {cache: 'no-store'});
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var html = await res.text();
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(html, 'text/html');
+
+      /* swap history body */
+      var nb = doc.getElementById('history-body');
+      var cb = document.getElementById('history-body');
+      if (nb && cb) cb.innerHTML = nb.innerHTML;
+
+      /* update count label */
+      var nc = doc.getElementById('total-count');
+      var cc = document.getElementById('total-count');
+      if (nc && cc) cc.textContent = nc.textContent;
+    } catch(e) {
+      console.warn('Refresh failed:', e);
+    }
+    if (btn) btn.classList.remove('spinning');
+    startCountdown();
+  }
+
+  function startCountdown() {
+    remaining = INTERVAL;
+    setCountdown(remaining);
+    tick = setInterval(function(){
+      remaining -= 1;
+      setCountdown(remaining);
+      if (remaining <= 0) doRefresh();
+    }, 1000);
+  }
+
+  if (btn) btn.addEventListener('click', doRefresh);
+  startCountdown();
 })();
 </script>
 </body>
