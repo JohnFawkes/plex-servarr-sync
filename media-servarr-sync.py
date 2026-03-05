@@ -633,23 +633,23 @@ def _parse_episode_field(ep_str: str) -> tuple:
 def _extract_file_meta(file_obj: dict) -> tuple:
     """Return (quality_name, custom_format_names) from an episodeFile / movieFile dict.
 
-    quality_name       — e.g. "WEBDL-1080p" from file_obj.quality.quality.name
-    custom_format_names — list of strings from file_obj.customFormats[].name
+    Sonarr/Radarr webhooks send episodeFile.quality as a plain string (e.g. "WEBDL-1080p").
+    The API object form {quality: {name: "..."}} is also handled for completeness.
+    Note: customFormats are at the top-level payload, not inside the file object — callers
+    must extract those separately from the raw event dict.
     """
     quality = ""
-    q = file_obj.get('quality', {})
-    if isinstance(q, dict):
+    q = file_obj.get('quality')
+    if isinstance(q, str):
+        quality = q                          # webhook plain-string form
+    elif isinstance(q, dict):
         inner = q.get('quality', {})
         if isinstance(inner, dict):
             quality = inner.get('name', '') or ''
+        elif isinstance(inner, str):
+            quality = inner
 
-    formats = []
-    for cf in file_obj.get('customFormats', []):
-        name = cf.get('name', '') if isinstance(cf, dict) else ''
-        if name:
-            formats.append(name)
-
-    return quality, formats
+    return quality, []
 
 
 def _merge_custom_formats(existing: str, incoming: str) -> str:
@@ -777,7 +777,7 @@ def process_webhook(data: dict, instance_type: str):
         raw_path = data['movie'].get('folderPath', '')
         mf = data.get('movieFile', {})
         if mf:
-            quality, custom_formats_list = _extract_file_meta(mf)
+            quality, _ = _extract_file_meta(mf)
 
     elif 'series' in data:
         series_path = data['series'].get('path', '')
@@ -808,7 +808,7 @@ def process_webhook(data: dict, instance_type: str):
                 fn = rp.replace('\\', '/').split('/')[-1]
                 if fn not in _deleted_filenames:
                     episode_files = [fn]
-                    quality, custom_formats_list = _extract_file_meta(ef)
+                    quality, _ = _extract_file_meta(ef)
                 else:
                     log.info("[%s] episodeFile '%s' matches a deletedFile — discarding stale episode info",
                              label, fn)
@@ -820,14 +820,9 @@ def process_webhook(data: dict, instance_type: str):
                     f.get('relativePath', '').replace('\\', '/').split('/')[-1]
                     for f in efs if f.get('relativePath')
                 ]
-                # Quality from first file; custom formats unioned across all files
+                # Quality from first file (custom formats come from top-level payload)
                 if efs:
-                    quality, custom_formats_list = _extract_file_meta(efs[0])
-                    for f in efs[1:]:
-                        _, extra = _extract_file_meta(f)
-                        for fmt in extra:
-                            if fmt not in custom_formats_list:
-                                custom_formats_list.append(fmt)
+                    quality, _ = _extract_file_meta(efs[0])
 
         if not episode_files:
             refs = data.get('renamedEpisodeFiles', [])
@@ -837,17 +832,27 @@ def process_webhook(data: dict, instance_type: str):
                     for f in refs if f.get('relativePath')
                 ]
                 if refs:
-                    quality, custom_formats_list = _extract_file_meta(refs[0])
-                    for f in refs[1:]:
-                        _, extra = _extract_file_meta(f)
-                        for fmt in extra:
-                            if fmt not in custom_formats_list:
-                                custom_formats_list.append(fmt)
+                    quality, _ = _extract_file_meta(refs[0])
 
         if len(episode_files) == 1:
             episode = episode_files[0]
         elif len(episode_files) > 1:
             episode = json.dumps(episode_files)
+
+    # Sonarr and Radarr both place customFormats at the TOP LEVEL of the webhook
+    # payload, not inside episodeFile/movieFile.  Merge them in now.
+    for cf in data.get('customFormats', []):
+        if isinstance(cf, dict):
+            name = cf.get('name', '')
+        elif isinstance(cf, str):
+            name = cf
+        else:
+            name = ''
+        if name and name not in custom_formats_list:
+            custom_formats_list.append(name)
+
+    if quality or custom_formats_list:
+        log.info("[%s] Captured quality=%r custom_formats=%r", label, quality, custom_formats_list)
 
     custom_formats = json.dumps(custom_formats_list) if custom_formats_list else ""
     result, status = enqueue_sync(raw_path, label, episode=episode,
