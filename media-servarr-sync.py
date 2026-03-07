@@ -345,15 +345,15 @@ class SyncHistory:
                 if profile_filter:
                     conditions.append("quality_profile = ?")
                     params.append(profile_filter)
-                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                query = (
+                    "SELECT ts, label, path, status, error, duration_s, episode, quality, custom_formats, quality_profile"
+                    " FROM sync_history"
+                )
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
+                query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
                 params.extend([limit, offset])
-                cursor = conn.execute(f"""
-                    SELECT ts, label, path, status, error, duration_s, episode, quality, custom_formats, quality_profile
-                    FROM sync_history
-                    {where}
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """, params)
+                cursor = conn.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
     def count(self, search: str = "", status_filter: str = "",
@@ -374,8 +374,10 @@ class SyncHistory:
                 if profile_filter:
                     conditions.append("quality_profile = ?")
                     params.append(profile_filter)
-                where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-                cursor = conn.execute(f"SELECT COUNT(*) FROM sync_history {where}", params)
+                query = "SELECT COUNT(*) FROM sync_history"
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
+                cursor = conn.execute(query, params)
                 return cursor.fetchone()[0]
 
     def as_list(self) -> list:
