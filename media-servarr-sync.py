@@ -192,7 +192,11 @@ def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
     """
     url = SONARR_URL if arr_type == "sonarr" else RADARR_URL
     key = SONARR_API_KEY if arr_type == "sonarr" else RADARR_API_KEY
-    if not url or not key or not item_id:
+    if not url or not key:
+        log.debug("[%s] Quality profile lookup skipped — %s_URL / %s_API_KEY not set",
+                  arr_type.upper(), arr_type.upper(), arr_type.upper())
+        return ""
+    if not item_id:
         return ""
 
     headers = {"X-Api-Key": key}
@@ -920,6 +924,15 @@ def process_webhook(data: dict, instance_type: str):
 
     # Sonarr and Radarr both place customFormats at the TOP LEVEL of the webhook
     # payload, not inside episodeFile/movieFile.  Merge them in now.
+    #
+    # Always log raw values so operators can see exactly what the arr sent,
+    # regardless of whether extraction succeeded.
+    _raw_file   = data.get('episodeFile') or data.get('movieFile') or {}
+    _raw_qual   = _raw_file.get('quality', '<MISSING>')
+    _raw_cf     = data.get('customFormats', '<MISSING>')
+    log.info("[%s] Raw webhook fields — episodeFile/movieFile.quality=%r  top-level customFormats=%r",
+             label, _raw_qual, _raw_cf)
+
     for cf in data.get('customFormats', []):
         if isinstance(cf, dict):
             name = cf.get('name', '')
@@ -1776,6 +1789,8 @@ if __name__ == '__main__':
 
     log.info("=== Media Servarr Sync starting ===")
     log.info("Rclone integration: %s", "ENABLED" if USE_RCLONE else "DISABLED (set USE_RCLONE=true to enable)")
+    log.info("Sonarr API: %s", SONARR_URL if SONARR_URL and SONARR_API_KEY else "NOT CONFIGURED (set SONARR_URL + SONARR_API_KEY for quality-profile badges)")
+    log.info("Radarr API: %s", RADARR_URL if RADARR_URL and RADARR_API_KEY else "NOT CONFIGURED (set RADARR_URL + RADARR_API_KEY for quality-profile badges)")
     _log_env()
 
     worker_thread = threading.Thread(target=sync_worker, daemon=True, name="sync-worker")
