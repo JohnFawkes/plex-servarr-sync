@@ -15,7 +15,8 @@ WORKDIR /app
 
 # ── Python deps (cached layer) ────────────────────────────────────────────────
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip>=26.0 \
+    && pip install --no-cache-dir -r requirements.txt
 
 # ── App source ────────────────────────────────────────────────────────────────
 COPY media-servarr-sync.py .
