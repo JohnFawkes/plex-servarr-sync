@@ -851,6 +851,7 @@ def process_webhook(data: dict, instance_type: str):
         return jsonify({"status": "skipped", "reason": f"event type '{event}' not handled"}), 200
 
     label = instance_type.upper()
+    log.info("[%s] Processing event type '%s'", label, event)
     raw_path = ""
     episode = ""
     quality = ""
