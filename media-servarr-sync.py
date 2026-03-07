@@ -326,7 +326,8 @@ class SyncHistory:
                 conn.commit()
 
     def get_recent(self, limit: int = 50, offset: int = 0,
-                   search: str = "", status_filter: str = "") -> list:
+                   search: str = "", status_filter: str = "",
+                   quality_filter: str = "", profile_filter: str = "") -> list:
         """Get recent entries with optional path search and status filter."""
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
@@ -338,6 +339,12 @@ class SyncHistory:
                 if status_filter:
                     conditions.append("status = ?")
                     params.append(status_filter)
+                if quality_filter:
+                    conditions.append("quality = ?")
+                    params.append(quality_filter)
+                if profile_filter:
+                    conditions.append("quality_profile = ?")
+                    params.append(profile_filter)
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 params.extend([limit, offset])
                 cursor = conn.execute(f"""
@@ -349,7 +356,8 @@ class SyncHistory:
                 """, params)
                 return [dict(row) for row in cursor.fetchall()]
 
-    def count(self, search: str = "", status_filter: str = "") -> int:
+    def count(self, search: str = "", status_filter: str = "",
+              quality_filter: str = "", profile_filter: str = "") -> int:
         """Get total number of entries matching optional search and status filter."""
         with self._lock:
             with sqlite3.connect(self._db_path) as conn:
@@ -360,6 +368,12 @@ class SyncHistory:
                 if status_filter:
                     conditions.append("status = ?")
                     params.append(status_filter)
+                if quality_filter:
+                    conditions.append("quality = ?")
+                    params.append(quality_filter)
+                if profile_filter:
+                    conditions.append("quality_profile = ?")
+                    params.append(profile_filter)
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 cursor = conn.execute(f"SELECT COUNT(*) FROM sync_history {where}", params)
                 return cursor.fetchone()[0]
@@ -1024,6 +1038,8 @@ def manual_webhook():
     # Filters
     search_q = request.args.get('q', '').strip()
     status_filter = request.args.get('status', '').strip()
+    quality_filter = request.args.get('quality', '').strip()
+    profile_filter = request.args.get('profile', '').strip()
     if status_filter not in ('ok', 'error', ''):
         status_filter = ''
 
@@ -1032,8 +1048,11 @@ def manual_webhook():
     per_page = 25
     offset = (page - 1) * per_page
 
-    recent = history.get_recent(limit=per_page, offset=offset, search=search_q, status_filter=status_filter)
-    total_count = history.count(search=search_q, status_filter=status_filter)
+    recent = history.get_recent(limit=per_page, offset=offset, search=search_q,
+                                status_filter=status_filter, quality_filter=quality_filter,
+                                profile_filter=profile_filter)
+    total_count = history.count(search=search_q, status_filter=status_filter,
+                                quality_filter=quality_filter, profile_filter=profile_filter)
     total_pages = (total_count + per_page - 1) // per_page
 
     for item in recent:
@@ -1046,8 +1065,17 @@ def manual_webhook():
         except (json.JSONDecodeError, ValueError):
             item['custom_format_list'] = []
 
-    search_qs = urllib.parse.urlencode([('q', search_q)])
-    filter_qs  = urllib.parse.urlencode([('q', search_q), ('status', status_filter)])
+    def _qs(**kw):
+        return urllib.parse.urlencode([(k, v) for k, v in kw.items() if v])
+
+    # search_qs: preserves q + quality + profile (used by status pills)
+    search_qs    = _qs(q=search_q, quality=quality_filter, profile=profile_filter)
+    # filter_qs: all active filters (used by pagination)
+    filter_qs    = _qs(q=search_q, status=status_filter, quality=quality_filter, profile=profile_filter)
+    # no_quality_qs: all filters except quality (used by quality tag links + clear quality pill)
+    no_quality_qs = _qs(q=search_q, status=status_filter, profile=profile_filter)
+    # no_profile_qs: all filters except profile (used by profile tag links + clear profile pill)
+    no_profile_qs = _qs(q=search_q, status=status_filter, quality=quality_filter)
 
     return render_template_string(
         MANUAL_UI_TEMPLATE,
@@ -1060,8 +1088,12 @@ def manual_webhook():
         retention_days=HISTORY_DAYS,
         search_q=search_q,
         status_filter=status_filter,
+        quality_filter=quality_filter,
+        profile_filter=profile_filter,
         search_qs=search_qs,
         filter_qs=filter_qs,
+        no_quality_qs=no_quality_qs,
+        no_profile_qs=no_profile_qs,
     )
 
 
@@ -1426,6 +1458,26 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     background: rgba(52,211,153,0.12); color: #34d399;
     border: 1px solid rgba(52,211,153,0.25);
   }
+  a.tag {
+    text-decoration: none; cursor: pointer;
+    transition: opacity 0.12s, box-shadow 0.12s;
+  }
+  a.tag:hover { opacity: 0.75; }
+  a.tag.tag-active { box-shadow: 0 0 0 2px currentColor; }
+  .tag[data-tip] { position: relative; }
+  .tag[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 5px);
+    left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--muted); font-size: 9px; letter-spacing: 0.04em;
+    padding: 2px 7px; border-radius: 3px;
+    white-space: nowrap; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s;
+    z-index: 60; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .tag[data-tip]:hover::after { opacity: 1; }
 </style>
 </head>
 <body>
@@ -1468,6 +1520,8 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     <div class="filter-bar">
       <form method="get" style="display:contents">
         <input type="hidden" name="status" value="{{ status_filter }}">
+        <input type="hidden" name="quality" value="{{ quality_filter }}">
+        <input type="hidden" name="profile" value="{{ profile_filter }}">
         <input class="filter-search" type="text" name="q" id="search-input"
                value="{{ search_q }}" placeholder="Search by path…"
                autocomplete="off" spellcheck="false">
@@ -1479,6 +1533,14 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
            class="pill pill-ok{{ ' active' if status_filter == 'ok' else '' }}">OK</a>
         <a href="?{{ search_qs | safe }}&status=error&page=1"
            class="pill pill-err{{ ' active' if status_filter == 'error' else '' }}">Failed</a>
+        {% if quality_filter %}
+        <a href="?{{ no_quality_qs | safe }}&page=1"
+           class="pill active" title="Clear quality filter">{{ quality_filter }} ×</a>
+        {% endif %}
+        {% if profile_filter %}
+        <a href="?{{ no_profile_qs | safe }}&page=1"
+           class="pill active" title="Clear profile filter">{{ profile_filter }} ×</a>
+        {% endif %}
       </div>
     </div>
     <div id="history-body">
@@ -1509,8 +1571,16 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
           {% endif %}
           {% if h.quality_profile or h.quality or h.custom_format_list %}
           <div class="tag-row">
-            {% if h.quality_profile %}<span class="tag tag-qp">{{ h.quality_profile }}</span>{% endif %}
-            {% if h.quality %}<span class="tag tag-quality">{{ h.quality }}</span>{% endif %}
+            {% if h.quality_profile %}
+            <a href="?{{ no_profile_qs | safe }}&profile={{ h.quality_profile | urlencode }}&page=1"
+               class="tag tag-qp{{ ' tag-active' if profile_filter == h.quality_profile else '' }}"
+               data-tip="Profile">{{ h.quality_profile }}</a>
+            {% endif %}
+            {% if h.quality %}
+            <a href="?{{ no_quality_qs | safe }}&quality={{ h.quality | urlencode }}&page=1"
+               class="tag tag-quality{{ ' tag-active' if quality_filter == h.quality else '' }}"
+               data-tip="Quality">{{ h.quality }}</a>
+            {% endif %}
             {% for cf in h.custom_format_list %}<span class="tag tag-cf">{{ cf }}</span>{% endfor %}
           </div>
           {% endif %}
