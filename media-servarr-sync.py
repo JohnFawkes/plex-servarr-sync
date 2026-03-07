@@ -1003,7 +1003,7 @@ def login():
             session['authenticated'] = True
             next_url = request.args.get('next', '')
             parsed = urllib.parse.urlparse(next_url)
-            if parsed.netloc or not next_url:
+            if not next_url or parsed.scheme or parsed.netloc or not next_url.startswith('/') or next_url.startswith('//'):
                 next_url = url_for('manual_webhook')
             return redirect(next_url)
         error = "Invalid username or password."
