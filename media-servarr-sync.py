@@ -144,6 +144,13 @@ MANUAL_PASS     = os.getenv("MANUAL_PASS", "password")
 # Used to sign session cookies — set a long random string in your .env
 SECRET_KEY      = os.getenv("SECRET_KEY", os.urandom(24).hex())
 
+# Optional Sonarr/Radarr API credentials — used to look up quality profile names.
+# If unset, quality_profile badges are simply omitted.
+SONARR_URL     = os.getenv("SONARR_URL", "").rstrip('/')
+SONARR_API_KEY = os.getenv("SONARR_API_KEY", "")
+RADARR_URL     = os.getenv("RADARR_URL", "").rstrip('/')
+RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
+
 # Rclone — set USE_RCLONE=false to skip all rclone calls entirely
 USE_RCLONE        = os.getenv("USE_RCLONE", "false").strip().lower() in ("1", "true", "yes")
 RCLONE_RC_URL     = os.getenv("RCLONE_RC_URL", "").rstrip('/')
@@ -168,6 +175,64 @@ app.secret_key = SECRET_KEY
 
 
 # ---------------------------------------------------------------------------
+# Quality profile lookup (Sonarr / Radarr API)
+# ---------------------------------------------------------------------------
+
+# Two-level cache: profile list (id→name) and per-series/movie id→profile_id.
+# Both are loaded lazily on the first webhook and held in memory.
+_qp_profiles:    dict[str, dict[int, str]] = {}   # arr_type → {profile_id: name}
+_qp_series_map:  dict[str, dict[int, int]] = {}   # arr_type → {item_id: profile_id}
+_qp_lock = threading.Lock()
+
+
+def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
+    """Return the quality-profile name for a Sonarr series or Radarr movie.
+
+    Returns "" if credentials are not configured or the API call fails.
+    """
+    url = SONARR_URL if arr_type == "sonarr" else RADARR_URL
+    key = SONARR_API_KEY if arr_type == "sonarr" else RADARR_API_KEY
+    if not url or not key or not item_id:
+        return ""
+
+    headers = {"X-Api-Key": key}
+    label   = arr_type.upper()
+
+    with _qp_lock:
+        # Ensure profile list is loaded
+        if arr_type not in _qp_profiles:
+            try:
+                r = requests.get(f"{url}/api/v3/qualityprofile",
+                                 headers=headers, timeout=5)
+                r.raise_for_status()
+                _qp_profiles[arr_type] = {p['id']: p['name'] for p in r.json()}
+                log.info("[%s] Loaded %d quality profiles from API", label,
+                         len(_qp_profiles[arr_type]))
+            except Exception as exc:
+                log.warning("[%s] Could not load quality profiles: %s", label, exc)
+                _qp_profiles[arr_type] = {}
+
+        if arr_type not in _qp_series_map:
+            _qp_series_map[arr_type] = {}
+
+        # Look up this item's profile_id if not yet cached
+        if item_id not in _qp_series_map[arr_type]:
+            endpoint = "series" if arr_type == "sonarr" else "movie"
+            try:
+                r = requests.get(f"{url}/api/v3/{endpoint}/{item_id}",
+                                 headers=headers, timeout=5)
+                r.raise_for_status()
+                _qp_series_map[arr_type][item_id] = r.json().get('qualityProfileId', 0)
+            except Exception as exc:
+                log.warning("[%s] Could not fetch %s/%d for quality profile: %s",
+                            label, endpoint, item_id, exc)
+                return ""
+
+        profile_id = _qp_series_map[arr_type].get(item_id, 0)
+        return _qp_profiles[arr_type].get(profile_id, "") if profile_id else ""
+
+
+# ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
 
@@ -182,6 +247,7 @@ class SyncTask:
     episode: str = ""
     quality: str = ""
     custom_formats: str = ""   # JSON-encoded list of format name strings
+    quality_profile: str = ""  # e.g. "HD-1080p" from Sonarr/Radarr quality profiles
     queued_at: float = field(default_factory=time.monotonic)
 
     def __eq__(self, other):
@@ -225,6 +291,8 @@ class SyncHistory:
                 conn.execute("ALTER TABLE sync_history ADD COLUMN quality TEXT DEFAULT ''")
             if 'custom_formats' not in existing:
                 conn.execute("ALTER TABLE sync_history ADD COLUMN custom_formats TEXT DEFAULT ''")
+            if 'quality_profile' not in existing:
+                conn.execute("ALTER TABLE sync_history ADD COLUMN quality_profile TEXT DEFAULT ''")
             conn.commit()
 
     def add(self, entry: dict):
@@ -234,8 +302,8 @@ class SyncHistory:
             with sqlite3.connect(self._db_path) as conn:
                 conn.execute("""
                     INSERT INTO sync_history
-                        (ts, label, path, status, error, duration_s, created_at, episode, quality, custom_formats)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (ts, label, path, status, error, duration_s, created_at, episode, quality, custom_formats, quality_profile)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     entry['ts'],
                     entry['label'],
@@ -247,6 +315,7 @@ class SyncHistory:
                     entry.get('episode', ''),
                     entry.get('quality', ''),
                     entry.get('custom_formats', ''),
+                    entry.get('quality_profile', ''),
                 ))
                 # Prune old entries
                 conn.execute("DELETE FROM sync_history WHERE created_at < ?", (cutoff,))
@@ -268,7 +337,7 @@ class SyncHistory:
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
                 params.extend([limit, offset])
                 cursor = conn.execute(f"""
-                    SELECT ts, label, path, status, error, duration_s, episode, quality, custom_formats
+                    SELECT ts, label, path, status, error, duration_s, episode, quality, custom_formats, quality_profile
                     FROM sync_history
                     {where}
                     ORDER BY created_at DESC
@@ -521,6 +590,7 @@ def sync_worker():
                 "episode": task.episode,
                 "quality": task.quality,
                 "custom_formats": task.custom_formats,
+                "quality_profile": task.quality_profile,
             })
             sync_queue.task_done()
 
@@ -675,7 +745,7 @@ def _merge_custom_formats(existing: str, incoming: str) -> str:
 
 
 def enqueue_sync(raw_path: str, label: str, episode: str = "",
-                 quality: str = "", custom_formats: str = ""):
+                 quality: str = "", custom_formats: str = "", quality_profile: str = ""):
     """Validate, map, and enqueue a sync task. Returns (response_dict, http_status)."""
     if not raw_path:
         return {"status": "skipped", "reason": "empty path"}, 200
@@ -706,6 +776,7 @@ def enqueue_sync(raw_path: str, label: str, episode: str = "",
         episode=episode,
         quality=quality,
         custom_formats=custom_formats,
+        quality_profile=quality_profile,
     )
 
     # Deduplication: if same folder already queued or in cooldown, skip re-queuing
@@ -719,9 +790,11 @@ def enqueue_sync(raw_path: str, label: str, episode: str = "",
                          label, mapped_folder, merged)
             else:
                 log.info("[%s] [DEDUP] Already queued: %s", label, mapped_folder)
-            # Quality: keep first non-empty value
+            # Quality / profile: keep first non-empty value
             if not existing_task.quality and quality:
                 existing_task.quality = quality
+            if not existing_task.quality_profile and quality_profile:
+                existing_task.quality_profile = quality_profile
             # Custom formats: union
             if custom_formats:
                 existing_task.custom_formats = _merge_custom_formats(
@@ -749,6 +822,12 @@ def process_webhook(data: dict, instance_type: str):
     event = data.get('eventType', '')
 
     if event == "Test":
+        label_up = instance_type.upper()
+        file_obj  = data.get('episodeFile') or data.get('movieFile') or {}
+        raw_qual  = file_obj.get('quality', 'NOT PRESENT in episodeFile/movieFile')
+        raw_cf    = data.get('customFormats', 'NOT PRESENT at top level')
+        log.info("[%s] Test webhook received — quality=%r  customFormats=%r  payload_keys=%s",
+                 label_up, raw_qual, raw_cf, sorted(data.keys()))
         return jsonify({"status": "test_success"}), 200
 
     # Skip events where no useful scan can be performed:
@@ -854,9 +933,18 @@ def process_webhook(data: dict, instance_type: str):
     if quality or custom_formats_list:
         log.info("[%s] Captured quality=%r custom_formats=%r", label, quality, custom_formats_list)
 
+    # Quality profile — not present in the webhook payload; requires an API round-trip.
+    item_id = 0
+    if 'movie' in data:
+        item_id = data['movie'].get('id', 0)
+    elif 'series' in data:
+        item_id = data['series'].get('id', 0)
+    quality_profile = _get_quality_profile_name(instance_type, item_id)
+
     custom_formats = json.dumps(custom_formats_list) if custom_formats_list else ""
     result, status = enqueue_sync(raw_path, label, episode=episode,
-                                  quality=quality, custom_formats=custom_formats)
+                                  quality=quality, custom_formats=custom_formats,
+                                  quality_profile=quality_profile)
     return jsonify(result), status
 
 
@@ -1321,6 +1409,10 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     background: rgba(167,139,250,0.12); color: #a78bfa;
     border: 1px solid rgba(167,139,250,0.25);
   }
+  .tag-qp {
+    background: rgba(52,211,153,0.12); color: #34d399;
+    border: 1px solid rgba(52,211,153,0.25);
+  }
 </style>
 </head>
 <body>
@@ -1402,8 +1494,9 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
               {% endif %}
             {% endif %}
           {% endif %}
-          {% if h.quality or h.custom_format_list %}
+          {% if h.quality_profile or h.quality or h.custom_format_list %}
           <div class="tag-row">
+            {% if h.quality_profile %}<span class="tag tag-qp">{{ h.quality_profile }}</span>{% endif %}
             {% if h.quality %}<span class="tag tag-quality">{{ h.quality }}</span>{% endif %}
             {% for cf in h.custom_format_list %}<span class="tag tag-cf">{{ cf }}</span>{% endfor %}
           </div>
