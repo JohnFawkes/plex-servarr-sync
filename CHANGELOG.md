@@ -10,10 +10,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Quality and custom-format tags** — each sync history entry now captures the file quality (e.g. `WEBDL-1080p`) and custom format names (e.g. `Uncensored`, `JA+EN Audio`) from the Sonarr/Radarr webhook payload and displays them as colour-coded inline tags beneath the episode info. Quality tags are shown in blue; custom-format tags in purple. Works for single downloads, batch/season-pack imports, rename events, and Radarr movies.
+- **Quality profile badges** — the quality profile name (e.g. `HD Quality`, `Any`) is fetched from the Sonarr/Radarr API using the profile ID from the webhook and displayed as a green tag alongside quality and custom-format tags. Profile ID→name mapping is cached in memory to avoid redundant API calls.
+- **Hoverable quality and profile tags** — hovering a quality or profile tag shows a small tooltip label (`"Quality"` / `"Profile"`) so the meaning of each tag is immediately clear.
+- **Filterable quality and profile tags** — clicking any quality or profile tag filters the sync history to entries matching that exact value. The active tag is highlighted with a colour-matched glow ring. Active filters appear as dismissible `×` pills in the filter bar alongside the existing status pills. All active filters (search, status, quality, profile) are preserved across pagination and search-form submits.
+- **Auto-refresh with countdown** — the sync history panel refreshes automatically every 30 seconds. A live countdown timer shows seconds until the next refresh and a manual `↻` refresh button lets users force an immediate update without navigating away.
+- **Startup API config logging** — Sonarr and Radarr API credentials (`SONARR_URL` / `SONARR_API_KEY`, `RADARR_URL` / `RADARR_API_KEY`) are validated at startup and their configured/missing state is logged so misconfigured profile lookups are immediately visible.
+- **Event type in webhook logs** — the `eventType` field from each Sonarr/Radarr webhook is now included in the processing log line for easier debugging.
 
 ### Fixed
 - Sonarr upgrade events (and standalone file-delete events) no longer record the **old** episode filename in sync history. `EpisodeFileDeleted`, `SeriesDelete`, `MovieFileDeleted`, `MovieDelete`, and `Grab` events are now silently skipped — the `Download` event that follows an upgrade is sufficient to trigger the scan with the correct new filename.
 - Additional guard for Sonarr `Download` events with `isUpgrade: true`: if the `episodeFile` field transiently references one of the files listed in `deletedFiles` (the files being replaced), that stale filename is discarded rather than written to history. This covers the edge case where Sonarr fires the upgrade `Download` webhook before its internal rename has completed.
+- Removed a spurious double border line above the pagination buttons in the sync history UI.
 
 ---
 
