@@ -131,6 +131,7 @@
   <div class="error">{{ error }}</div>
   {% endif %}
   <form method="post">
+    {% csrf_token %}
     <label for="username">Username</label>
     <input type="text" id="username" name="username" autocomplete="username" autofocus>
     <label for="password">Password</label>
