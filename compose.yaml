@@ -66,7 +66,7 @@ services:
     # CONTAINER_MEDIA = path inside this container = the path Plex uses (e.g. /data/media)
     # Remove this volume if you don't use MINIMUM_AGE.
     volumes:
-      - "${MEDIA_ROOT:-/mnt/media}:${CONTAINER_MEDIA:-/mnt/media}:ro,rslave"
+      - "${MEDIA_ROOT:-/mnt/media}:${CONTAINER_MEDIA:-/mnt/media}"
       # Persistent storage for sync history database
       - media-servarr-sync-data:/data
 

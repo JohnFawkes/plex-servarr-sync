@@ -1269,7 +1269,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     padding: 10px 14px;
     outline: none;
     transition: border-color 0.15s;
-  }
+6  }
 
   input[type="text"]:focus {
     border-color: var(--accent);
@@ -1788,7 +1788,7 @@ LOGIN_TEMPLATE = '''<!DOCTYPE html>
     text-transform: uppercase;
     margin-top: 4px;
     transition: opacity 0.15s;
-  }
+4  }
 
   button:hover { opacity: 0.85; }
 
