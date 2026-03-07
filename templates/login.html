@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Media Servarr Sync · Login</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><rect width='24' height='24' rx='4' fill='%230d0d0f'/><path stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' d='M20 12a8 8 0 1 1-1.6-4.8'/><polyline stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='20,4 20,8 16,8'/></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0d0d0f;
+    --surface: #161618;
+    --border: #2a2a2e;
+    --accent: #e5a00d;
+    --text: #e8e8e8;
+    --muted: #666;
+    --error: #f87171;
+    --radius: 4px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+
+  .logo-icon {
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 6px rgba(229,160,13,0.5));
+  }
+
+  h1 {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  input {
+    display: block;
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus { border-color: var(--accent); }
+
+  button {
+    width: 100%;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    color: #0d0d0f;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    padding: 11px;
+    cursor: pointer;
+    text-transform: uppercase;
+    margin-top: 4px;
+    transition: opacity 0.15s;
+  }
+
+  button:hover { opacity: 0.85; }
+
+  .error {
+    font-size: 11px;
+    color: var(--error);
+    background: rgba(248,113,113,0.07);
+    border: 1px solid var(--error);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="28" height="28">
+      <rect width="24" height="24" rx="4" fill="#0d0d0f"/>
+      <path stroke="#e5a00d" stroke-width="2" stroke-linecap="round" d="M20 12a8 8 0 1 1-1.6-4.8"/>
+      <polyline stroke="#e5a00d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="20,4 20,8 16,8"/>
+    </svg>
+    <h1>Media Servarr Sync</h1>
+  </div>
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+  <form method="post">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" autocomplete="username" autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password">
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+</body>
+</html>
