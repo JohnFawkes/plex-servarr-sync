@@ -1470,8 +1470,8 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     position: absolute;
     bottom: calc(100% + 5px);
     left: 50%; transform: translateX(-50%);
-    background: var(--surface); border: 1px solid var(--border);
-    color: var(--muted); font-size: 9px; letter-spacing: 0.04em;
+    background: #1a1a2e; border: 1px solid rgba(255,255,255,0.18);
+    color: #e2e8f0; font-size: 9px; letter-spacing: 0.04em;
     padding: 2px 7px; border-radius: 3px;
     white-space: nowrap; pointer-events: none;
     opacity: 0; transition: opacity 0.12s;

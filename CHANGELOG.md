@@ -6,14 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [v0.8.0] - 2026-03-07
+
+### Added
+- **Hoverable quality and profile tags** — hovering a quality or profile tag shows a small tooltip label (`"Quality"` / `"Profile"`) so the purpose of each tag is immediately clear without needing to know the colour convention.
+- **Filterable quality and profile tags** — clicking any quality or profile tag filters the sync history to entries matching that exact value. The active tag is highlighted with a colour-matched glow ring. Active filters appear as dismissible `×` pills in the filter bar alongside the status pills. All active filters (search, status, quality, profile) are preserved across pagination and search-form submits.
+
+### Fixed
+- Tag tooltips now use a dark background (`#1a1a2e`) with light text for legibility against all tag colours.
+
+---
+
+## [v0.7.0] - 2026-03-07
+
+### Added
+- **Event type in webhook logs** — the `eventType` field from each Sonarr/Radarr webhook is included in the processing log line for easier debugging.
+
+### Fixed
+- Sonarr and Radarr API credentials are validated at startup and their configured/missing state is logged, so misconfigured quality-profile lookups are immediately visible.
+- Removed a spurious double border line above the pagination buttons in the sync history UI.
+
+---
+
+## [v0.6.0] - 2026-03-07
+
+### Added
+- **Quality profile badges** — the quality profile name (e.g. `HD Quality`, `Any`) is fetched from the Sonarr/Radarr API using the profile ID from the webhook and displayed as a green tag alongside quality and custom-format tags. Profile ID→name mapping is cached in memory to avoid redundant API calls.
+
+---
+
+## [v0.5.0] - 2026-03-05
+
+### Added
+- **Auto-refresh with countdown** — the sync history panel refreshes automatically every 30 seconds. A live countdown timer shows seconds until the next refresh and a manual `↻` button triggers an immediate update.
+
+---
+
+## [v0.4.0] - 2026-03-05
 
 ### Added
 - **Quality and custom-format tags** — each sync history entry now captures the file quality (e.g. `WEBDL-1080p`) and custom format names (e.g. `Uncensored`, `JA+EN Audio`) from the Sonarr/Radarr webhook payload and displays them as colour-coded inline tags beneath the episode info. Quality tags are shown in blue; custom-format tags in purple. Works for single downloads, batch/season-pack imports, rename events, and Radarr movies.
 
 ### Fixed
+- Quality and custom-format values are now correctly extracted from the nested `quality.quality.name` and `customFormatScore` fields in Sonarr/Radarr webhook payloads.
+
+### Changed
+- Renovate updated `docker/setup-buildx-action` to v4 and `docker/login-action` to v4.
+
+---
+
+## [v0.3.0] - 2026-03-03
+
+### Added
+- All environment variables are logged at startup with secret values redacted, making misconfiguration easier to spot.
+- Flask development-server startup banner is suppressed for cleaner container logs.
+
+### Fixed
 - Sonarr upgrade events (and standalone file-delete events) no longer record the **old** episode filename in sync history. `EpisodeFileDeleted`, `SeriesDelete`, `MovieFileDeleted`, `MovieDelete`, and `Grab` events are now silently skipped — the `Download` event that follows an upgrade is sufficient to trigger the scan with the correct new filename.
-- Additional guard for Sonarr `Download` events with `isUpgrade: true`: if the `episodeFile` field transiently references one of the files listed in `deletedFiles` (the files being replaced), that stale filename is discarded rather than written to history. This covers the edge case where Sonarr fires the upgrade `Download` webhook before its internal rename has completed.
+- Additional guard for Sonarr `Download` events with `isUpgrade: true`: if the `episodeFile` field transiently references one of the files listed in `deletedFiles` (the files being replaced), that stale filename is discarded rather than written to history.
+- Multi-episode deduplication: when Sonarr fires both an `Import` and a trailing `Rename` webhook for the same episodes, the rename no longer creates a duplicate history entry with a doubled episode count.
+
+### Changed
+- Added Trivy container image vulnerability scanning to the Docker CI workflow.
+- Added `workflow_dispatch` trigger to allow manual runs of the Docker publish workflow.
 
 ---
 
