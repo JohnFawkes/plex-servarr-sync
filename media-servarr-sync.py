@@ -1355,8 +1355,7 @@ MANUAL_UI_TEMPLATE = '''<!DOCTYPE html>
     justify-content: space-between;
     align-items: center;
     margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
+    padding-top: 12px;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
   }
