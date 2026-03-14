@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import plexapi
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
+from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 from plexapi.server import PlexServer
 from plexapi.base import MediaContainer
@@ -79,6 +80,7 @@ logging.basicConfig(level=logging.INFO, handlers=[_handler])
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+csrf = CSRFProtect(app)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1078,11 +1080,13 @@ def process_webhook(data: dict, instance_type: str):
 # ---------------------------------------------------------------------------
 
 @app.route('/webhook/sonarr', methods=['POST'])
+@csrf.exempt
 def webhook_sonarr():
     return process_webhook(request.get_json(silent=True) or {}, "sonarr")
 
 
 @app.route('/webhook/radarr', methods=['POST'])
+@csrf.exempt
 def webhook_radarr():
     return process_webhook(request.get_json(silent=True) or {}, "radarr")
 
