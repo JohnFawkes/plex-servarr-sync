@@ -30,6 +30,7 @@ Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]
 - **Episode display** — for Sonarr events, the episode filename (e.g. `Show.S01E01.mkv`) is shown beneath the season folder path; batch imports show an episode-count badge that reveals individual filenames on hover
 - **Quality & profile tags** — each history entry displays colour-coded tags for the file quality (blue), quality profile (green, resolved via the Sonarr/Radarr API), and any custom formats (purple); hover a tag to see its label
 - **Filterable tags** — click any quality or profile tag to filter the history list to matching entries; active filters appear as dismissible pills in the filter bar and are preserved across search and pagination
+- **Tag colour legend** — a fixed panel on the left of the UI explains what each tag colour means (green = Quality Profile, blue = Quality, purple = Custom Format); hidden automatically on narrow viewports
 - **Auto-refresh** — sync history refreshes automatically every 30 seconds with a live countdown; a manual `↻` button triggers an immediate refresh
 
 ---

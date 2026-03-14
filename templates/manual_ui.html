@@ -316,9 +316,65 @@
     z-index: 60; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
   }
   .tag[data-tip]:hover::after { opacity: 1; }
+
+  .legend {
+    position: fixed;
+    left: 20px;
+    top: 48px;
+    width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .legend-title {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 7px;
+  }
+  .legend-item:last-child { margin-bottom: 0; }
+  .legend-swatch {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .legend-label {
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+  }
+  @media (max-width: 1000px) { .legend { display: none; } }
 </style>
 </head>
 <body>
+<aside class="legend">
+  <div class="legend-title">Tag Legend</div>
+  <div class="legend-item">
+    <span class="legend-swatch tag-qp">Profile</span>
+    <span class="legend-label">Quality<br>Profile</span>
+  </div>
+  <div class="legend-item">
+    <span class="legend-swatch tag-quality">Quality</span>
+    <span class="legend-label">Quality</span>
+  </div>
+  <div class="legend-item">
+    <span class="legend-swatch tag-cf">Format</span>
+    <span class="legend-label">Custom<br>Format</span>
+  </div>
+</aside>
 <div class="shell">
   <header>
     <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="28" height="28">
@@ -334,6 +390,7 @@
   <div class="card">
     <div class="card-label">Trigger path scan - (Path needs to be the same as your root path in sonarr or radarr)</div>
     <form method="post">
+      {% csrf_token %}
       <div class="input-row">
         <input type="text" name="path" placeholder="/mnt/media/tv/ShowName" autocomplete="off" spellcheck="false">
         <button type="submit">QUEUE</button>

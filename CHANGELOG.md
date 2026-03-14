@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.9.0] - 2026-03-14
+
+### Added
+- **Tag colour legend** — a fixed panel on the left side of the web UI lists the three tag colours and what they mean: green = Quality Profile, blue = Quality, purple = Custom Format. The legend is hidden automatically on narrow viewports where it would overlap the main content.
+
+### Security
+- **Open redirect hardening** — the post-login `next` redirect now additionally rejects URLs with an explicit scheme (e.g. `javascript:`, `data:`, `http:`) and protocol-relative URLs (e.g. `//evil.com`). Only strict relative paths beginning with `/` are accepted; everything else falls back to the default page.
+
+---
+
 ## [v0.8.0] - 2026-03-07
 
 ### Added
