@@ -184,6 +184,9 @@ _qp_profiles:    dict[str, dict[int, str]] = {}   # arr_type → {profile_id: na
 _qp_series_map:  dict[str, dict[int, int]] = {}   # arr_type → {item_id: profile_id}
 _qp_lock = threading.Lock()
 
+_cf_cache: dict[str, list] = {}   # arr_type → [{id, name, ...}, ...]
+_cf_lock  = threading.Lock()
+
 
 def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
     """Return the quality-profile name for a Sonarr series or Radarr movie.
@@ -234,6 +237,59 @@ def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
 
         profile_id = _qp_series_map[arr_type].get(item_id, 0)
         return _qp_profiles[arr_type].get(profile_id, "") if profile_id else ""
+
+
+def _refresh_custom_formats(arr_type: str) -> None:
+    """Fetch and cache all custom formats defined in Sonarr/Radarr.
+
+    Called on startup and every hour by the scheduler thread so the cache
+    stays current as users add/remove custom formats in their arr instances.
+    """
+    url = SONARR_URL if arr_type == "sonarr" else RADARR_URL
+    key = SONARR_API_KEY if arr_type == "sonarr" else RADARR_API_KEY
+    if not url or not key:
+        return
+    try:
+        r = requests.get(f"{url}/api/v3/customformat",
+                         headers={"X-Api-Key": key}, timeout=10)
+        r.raise_for_status()
+        formats = r.json()
+        with _cf_lock:
+            _cf_cache[arr_type] = formats
+        log.info("[%s] Custom format cache refreshed — %d formats",
+                 arr_type.upper(), len(formats))
+    except Exception as exc:
+        log.warning("[%s] Could not refresh custom formats: %s", arr_type.upper(), exc)
+
+
+def _fetch_custom_formats_for_file(arr_type: str, file_id: int) -> list[str]:
+    """Return matched custom-format names for a specific episode/movie file.
+
+    Calls /api/v3/episodefile/{id} (Sonarr) or /api/v3/moviefile/{id} (Radarr)
+    which includes the resolved customFormats for that file — information not
+    reliably present in the webhook payload.
+
+    Returns [] if credentials are not configured or the API call fails.
+    """
+    if not file_id:
+        return []
+    url = SONARR_URL if arr_type == "sonarr" else RADARR_URL
+    key = SONARR_API_KEY if arr_type == "sonarr" else RADARR_API_KEY
+    if not url or not key:
+        return []
+    endpoint = "episodefile" if arr_type == "sonarr" else "moviefile"
+    try:
+        r = requests.get(f"{url}/api/v3/{endpoint}/{file_id}",
+                         headers={"X-Api-Key": key}, timeout=5)
+        r.raise_for_status()
+        names = [cf['name'] for cf in r.json().get('customFormats', []) if cf.get('name')]
+        log.info("[%s] API custom formats for %s/%d: %r",
+                 arr_type.upper(), endpoint, file_id, names)
+        return names
+    except Exception as exc:
+        log.warning("[%s] Could not fetch custom formats for %s/%d: %s",
+                    arr_type.upper(), endpoint, file_id, exc)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -617,6 +673,30 @@ def sync_worker():
     log.info("Sync worker stopped")
 
 
+def custom_format_refresh_scheduler() -> None:
+    """Background thread: refresh the custom-format cache from Sonarr/Radarr every hour.
+
+    Runs an initial population 15 seconds after startup (giving the arrs time
+    to be reachable), then repeats every hour.  Shutdown is honoured within one
+    second via the shared _worker_alive event.
+    """
+    log.info("Custom format scheduler started")
+    # Short initial delay so the arrs are likely up before we hit their API
+    deadline = time.monotonic() + 15
+    while _worker_alive.is_set() and time.monotonic() < deadline:
+        time.sleep(1)
+
+    while _worker_alive.is_set():
+        for arr_type in ('sonarr', 'radarr'):
+            _refresh_custom_formats(arr_type)
+        # Wait 1 hour, checking shutdown signal each second
+        deadline = time.monotonic() + 3600
+        while _worker_alive.is_set() and time.monotonic() < deadline:
+            time.sleep(1)
+
+    log.info("Custom format scheduler stopped")
+
+
 def _find_plex_item(plex_instance, library, task: SyncTask):
     """Try to locate the newly-scanned item in Plex via path query then title search."""
     search_path = task.mapped_folder.rstrip('/')
@@ -939,26 +1019,41 @@ def process_webhook(data: dict, instance_type: str):
         elif len(episode_files) > 1:
             episode = json.dumps(episode_files)
 
-    # Sonarr and Radarr both place customFormats at the TOP LEVEL of the webhook
-    # payload, not inside episodeFile/movieFile.  Merge them in now.
-    #
-    # Always log raw values so operators can see exactly what the arr sent,
-    # regardless of whether extraction succeeded.
-    _raw_file   = data.get('episodeFile') or data.get('movieFile') or {}
-    _raw_qual   = _raw_file.get('quality', '<MISSING>')
-    _raw_cf     = data.get('customFormats', '<MISSING>')
+    # Log raw webhook fields for operator visibility.
+    _raw_file = data.get('episodeFile') or data.get('movieFile') or {}
+    _raw_qual = _raw_file.get('quality', '<MISSING>')
+    _raw_cf   = data.get('customFormats', '<MISSING>')
     log.info("[%s] Raw webhook fields — episodeFile/movieFile.quality=%r  top-level customFormats=%r",
              label, _raw_qual, _raw_cf)
 
-    for cf in data.get('customFormats', []):
-        if isinstance(cf, dict):
-            name = cf.get('name', '')
-        elif isinstance(cf, str):
-            name = cf
-        else:
-            name = ''
-        if name and name not in custom_formats_list:
-            custom_formats_list.append(name)
+    # Resolve the file ID so we can query the arr API for accurate custom formats.
+    # Webhooks sometimes omit customFormats or only include a subset; the
+    # /episodefile/{id} and /moviefile/{id} endpoints always return the full
+    # evaluated list for that file.
+    _file_id = 0
+    if data.get('movieFile'):
+        _file_id = data['movieFile'].get('id', 0)
+    elif data.get('episodeFile'):
+        _file_id = data['episodeFile'].get('id', 0)
+    elif data.get('episodeFiles'):
+        _file_id = data['episodeFiles'][0].get('id', 0)
+    elif data.get('renamedEpisodeFiles'):
+        _file_id = data['renamedEpisodeFiles'][0].get('id', 0)
+
+    api_cf = _fetch_custom_formats_for_file(instance_type, _file_id)
+    if api_cf:
+        custom_formats_list = api_cf
+    else:
+        # Fall back to whatever the webhook included (may be empty or partial)
+        for cf in data.get('customFormats', []):
+            if isinstance(cf, dict):
+                name = cf.get('name', '')
+            elif isinstance(cf, str):
+                name = cf
+            else:
+                name = ''
+            if name and name not in custom_formats_list:
+                custom_formats_list.append(name)
 
     if quality or custom_formats_list:
         log.info("[%s] Captured quality=%r custom_formats=%r", label, quality, custom_formats_list)
@@ -1199,6 +1294,9 @@ if __name__ == '__main__':
 
     worker_thread = threading.Thread(target=sync_worker, daemon=True, name="sync-worker")
     worker_thread.start()
+
+    cf_thread = threading.Thread(target=custom_format_refresh_scheduler, daemon=True, name="cf-scheduler")
+    cf_thread.start()
 
     log.info("Webhook receiver active on port %d", PORT)
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
