@@ -476,7 +476,7 @@
                class="tag tag-quality{{ ' tag-active' if quality_filter == h.quality else '' }}"
                data-tip="Quality">{{ h.quality }}</a>
             {% endif %}
-            {% for cf in h.custom_format_list %}<span class="tag tag-cf">{{ cf }}</span>{% endfor %}
+            {% for cf in h.custom_format_list %}<span class="tag tag-cf" data-tip="Format">{{ cf }}</span>{% endfor %}
           </div>
           {% endif %}
           <div class="h-label">{{ h.label }} &nbsp;·&nbsp; {{ h.duration_s }}s</div>

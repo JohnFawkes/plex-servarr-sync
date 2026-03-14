@@ -934,15 +934,15 @@ def process_webhook(data: dict, instance_type: str):
 
     # Skip events where no useful scan can be performed:
     #   Grab              — file is queued in the download client, not on disk yet
-    #   EpisodeFileDeleted / MovieFileDeleted — the deleted file's path ends up in
+    #   EpisodeFileDelete / MovieFileDelete — the deleted file's path ends up in
     #                       `episodeFile`, which would record the OLD filename in
     #                       history; upgrades are covered by the subsequent Download event
     #   SeriesDelete / MovieDelete — entire series/movie removed; Plex scheduled scans
     #                       will eventually catch this, a targeted partial scan won't help
     _SKIP = {
         'Grab',
-        'EpisodeFileDeleted', 'SeriesDelete',   # Sonarr
-        'MovieFileDeleted',   'MovieDelete',     # Radarr
+        'EpisodeFileDelete', 'EpisodeFileDeleted', 'SeriesDelete',   # Sonarr
+        'MovieFileDelete',   'MovieFileDeleted',   'MovieDelete',     # Radarr
     }
     if event in _SKIP:
         log.info("[%s] Skipping event type '%s' (no scan needed)", instance_type.upper(), event)
