@@ -389,7 +389,7 @@
 
   <div class="card">
     <div class="card-label">Trigger path scan - (Path needs to be the same as your root path in sonarr or radarr)</div>
-    <form method="post">
+    <form method="post"> {# nosemgrep: django-no-csrf-token #}
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="input-row">
         <input type="text" name="path" placeholder="/mnt/media/tv/ShowName" autocomplete="off" spellcheck="false">
