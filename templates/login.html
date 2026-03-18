@@ -130,7 +130,7 @@
   {% if error %}
   <div class="error">{{ error }}</div>
   {% endif %}
-  <form method="post">
+  <form method="post"> {# nosemgrep: django-no-csrf-token #}
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="username">Username</label>
     <input type="text" id="username" name="username" autocomplete="username" autofocus>
