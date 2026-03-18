@@ -32,6 +32,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import plexapi
+from waitress import serve
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
@@ -1303,4 +1304,4 @@ if __name__ == '__main__':
     cf_thread.start()
 
     log.info("Webhook receiver active on port %d", PORT)
-    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    serve(app, host='0.0.0.0', port=PORT)
