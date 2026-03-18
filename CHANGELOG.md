@@ -16,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`EpisodeFileDelete` / `MovieFileDelete` skipping** — the event names in `_SKIP` were incorrect (`EpisodeFileDelete` instead of `EpisodeFileDeleted`); events are now skipped as intended.
 - **Custom format tag tooltip** — hovering a custom format (purple) tag now shows a `"Format"` tooltip label, consistent with Quality and Profile tags.
 
+### Changed
+- Raw `quality` and `customFormats` fields from every incoming Sonarr/Radarr webhook are now logged at `INFO` level, making it easier to diagnose mismatches between what the arr sends and what gets stored.
+- CI: `templates/**` added to the Docker workflow path filter so image builds are triggered when template files change.
+
 ### Security
 - **Reflected XSS (CodeQL #2/#3)** — webhook responses no longer echo user-supplied data (`path`, `eventType`) back in the JSON body, eliminating the taint flows flagged by CodeQL.
 - **Open redirect (login)** — the post-login `next` redirect is now replaced entirely with a static `redirect(url_for('manual_webhook'))`, removing all user-controlled data from the call to `redirect()`.
