@@ -915,7 +915,7 @@ def enqueue_sync(raw_path: str, label: str, episode: str = "",
 
     sync_queue.put(task)
     log.info("[%s] [QUEUE] Added (depth=%d): %s", label, sync_queue.qsize(), mapped_folder)
-    return {"status": "queued", "path": mapped_folder}, 200
+    return {"status": "queued"}, 200
 
 
 def process_webhook(data: dict, instance_type: str):
@@ -947,7 +947,7 @@ def process_webhook(data: dict, instance_type: str):
     }
     if event in _SKIP:
         log.info("[%s] Skipping event type '%s' (no scan needed)", instance_type.upper(), event)
-        return jsonify({"status": "skipped", "reason": f"event type '{event}' not handled"}), 200
+        return jsonify({"status": "skipped", "reason": "event type not handled"}), 200
 
     label = instance_type.upper()
     log.info("[%s] Processing event type '%s'", label, event)
