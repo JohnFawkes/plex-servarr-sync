@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.10.0] - 2026-03-18
+
+### Added
+- **Custom formats fetched from arr API** — custom formats are now retrieved directly from the Sonarr/Radarr `/episodefile/{id}` or `/moviefile/{id}` endpoint instead of relying on the webhook payload, which can be incomplete or stale.
+
+### Fixed
+- **Waitress WSGI server** — replaced the Flask development server with [waitress](https://docs.pylonsproject.org/projects/waitress/) for production use.
+- **`EpisodeFileDelete` / `MovieFileDelete` skipping** — the event names in `_SKIP` were incorrect (`EpisodeFileDelete` instead of `EpisodeFileDeleted`); events are now skipped as intended.
+- **Custom format tag tooltip** — hovering a custom format (purple) tag now shows a `"Format"` tooltip label, consistent with Quality and Profile tags.
+
+### Changed
+- Raw `quality` and `customFormats` fields from every incoming Sonarr/Radarr webhook are now logged at `INFO` level, making it easier to diagnose mismatches between what the arr sends and what gets stored.
+- CI: `templates/**` added to the Docker workflow path filter so image builds are triggered when template files change.
+
+### Security
+- **Reflected XSS (CodeQL #2/#3)** — webhook responses no longer echo user-supplied data (`path`, `eventType`) back in the JSON body, eliminating the taint flows flagged by CodeQL.
+- **Open redirect (login)** — the post-login `next` redirect is now replaced entirely with a static `redirect(url_for('manual_webhook'))`, removing all user-controlled data from the call to `redirect()`.
+- **CSRF protection** — replaced the invalid Django-style `{% csrf_token %}` tag with proper Flask-WTF CSRF token injection (`{{ csrf_token() }}`) in both the login and manual UI forms.
+- **SSTI prevention** — inline template strings moved to files under `templates/` and rendered via `render_template()`, eliminating server-side template injection risk.
+- **SQL injection prevention** — removed f-string interpolation in raw SQL queries; all dynamic values now use parameterised query placeholders.
+- **Pip CVE-2026-1703** — base Docker image pins `pip >= 26.0` to address the path traversal vulnerability.
+
+---
+
 ## [v0.9.0] - 2026-03-14
 
 ### Added
