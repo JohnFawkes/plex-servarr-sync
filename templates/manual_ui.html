@@ -182,15 +182,15 @@
     border: 1px solid var(--accent);
     border-radius: var(--radius);
     padding: 6px 10px;
-    min-width: 220px; max-width: 600px;
-    z-index: 50;
+    min-width: 420px; max-width: 900px;
+  z-index: 50;
     box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   }
   .ep-wrap:hover .ep-tooltip { display: block; }
   .ep-tip-row {
     font-size: 10px; color: var(--text);
     padding: 3px 0; border-bottom: 1px solid var(--border);
-    white-space: normal; word-break: break-all;
+    white-space: nowrap;
   }
   .ep-tip-row:last-child { border-bottom: none; }
 
@@ -321,7 +321,7 @@
     position: fixed;
     left: 20px;
     top: 48px;
-    width: 180px;
+    width: 140px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
