@@ -27,7 +27,7 @@ Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]
 - **Stats API** — `/api/stats` returns aggregate sync counts, queue state, and last sync info — ready for [Homepage](https://gethomepage.dev) `customapi` widget
 - **Manual trigger UI** — password-protected web UI at `/` for ad-hoc scans
 - **Sync history** — paginated sync results (path, status, duration, errors) with server-side path search and status filter (All / OK / Failed)
-- **Episode display** — for Sonarr events, the episode filename (e.g. `Show.S01E01.mkv`) is shown beneath the season folder path; batch imports show an episode-count badge that reveals individual filenames on hover
+- **Episode display** — for Sonarr events, the episode filename (e.g. `Show.S01E01.mkv`) is shown beneath the season folder path; batch imports show an episode-count badge that reveals all individual filenames on hover (filenames wrap fully, no truncation)
 - **Quality & profile tags** — each history entry displays colour-coded tags for the file quality (blue), quality profile (green, resolved via the Sonarr/Radarr API), and any custom formats (purple); hover a tag to see its label
 - **Filterable tags** — click any quality or profile tag to filter the history list to matching entries; active filters appear as dismissible pills in the filter bar and are preserved across search and pagination
 - **Tag colour legend** — a fixed panel on the left of the UI explains what each tag colour means (green = Quality Profile, blue = Quality, purple = Custom Format); hidden automatically on narrow viewports

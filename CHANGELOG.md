@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Waitress WSGI server** — replaced the Flask development server with [waitress](https://docs.pylonsproject.org/projects/waitress/) for production use.
 - **`EpisodeFileDelete` / `MovieFileDelete` skipping** — the event names in `_SKIP` were incorrect (`EpisodeFileDelete` instead of `EpisodeFileDeleted`); events are now skipped as intended.
 - **Custom format tag tooltip** — hovering a custom format (purple) tag now shows a `"Format"` tooltip label, consistent with Quality and Profile tags.
+- **Episode tooltip truncation** — filenames in the multi-episode hover tooltip no longer truncate with an ellipsis; they wrap fully so every filename is readable regardless of length.
 
 ### Changed
 - Raw `quality` and `customFormats` fields from every incoming Sonarr/Radarr webhook are now logged at `INFO` level, making it easier to diagnose mismatches between what the arr sends and what gets stored.
