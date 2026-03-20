@@ -1545,8 +1545,11 @@ def api_thumb():
         return '', 404
     if not (key.startswith('/library/') or key.startswith('/photo/')):
         return '', 403
-    width  = request.args.get('w', '80')
-    height = request.args.get('h', '120')
+    try:
+        width  = max(1, min(int(request.args.get('w', '80')),  2000))
+        height = max(1, min(int(request.args.get('h', '120')), 2000))
+    except (ValueError, TypeError):
+        return '', 400
     try:
         url = (
             f"{PLEX_URL}/photo/:/transcode"
@@ -1556,8 +1559,13 @@ def api_thumb():
         )
         resp = requests.get(url, timeout=10)
         if resp.ok:
+            ct = resp.headers.get('Content-Type', 'image/jpeg')
+            # Only forward safe image content types; never forward text/html or
+            # other types that the browser would render, which could allow XSS.
+            if not ct.startswith('image/'):
+                ct = 'image/jpeg'
             return resp.content, 200, {
-                'Content-Type': resp.headers.get('Content-Type', 'image/jpeg'),
+                'Content-Type': ct,
                 'Cache-Control': 'public, max-age=3600',
             }
         return '', 404
