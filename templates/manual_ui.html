@@ -3,8 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Media Servarr Sync</title>
+<title>Plex Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><rect width='24' height='24' rx='4' fill='%230d0d0f'/><path stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' d='M20 12a8 8 0 1 1-1.6-4.8'/><polyline stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='20,4 20,8 16,8'/></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
@@ -415,6 +417,183 @@
     letter-spacing: 0.03em;
   }
   @media (max-width: 1000px) { .legend { display: none; } }
+
+  /* -------- Header nav -------- */
+  .header-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+  }
+  .header-nav {
+    display: flex;
+    gap: 6px;
+  }
+  .nav-link {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .nav-link:hover    { color: var(--text); border-color: var(--text); }
+  .nav-link.active   { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+  /* -------- Now Playing -------- */
+  .np-empty {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    text-align: center;
+    padding: 20px 0;
+  }
+  .np-session {
+    display: grid;
+    grid-template-columns: 72px 1fr 158px;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+  .np-session:last-child { border-bottom: none; }
+  @media (max-width: 560px) {
+    .np-session { grid-template-columns: 60px 1fr; }
+    .np-map-col { display: none; }
+  }
+  .np-poster-wrap a { display: block; }
+  .np-poster {
+    width: 72px; height: 108px;
+    object-fit: cover;
+    border-radius: 3px;
+    display: block;
+    transition: opacity 0.15s;
+  }
+  .np-poster:hover { opacity: 0.85; }
+  .np-poster-ph {
+    width: 72px; height: 108px;
+    background: var(--border);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 22px;
+  }
+  .np-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .np-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .np-titles { flex: 1; min-width: 0; }
+  .np-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .np-year   { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .np-show   { font-size: 12px; font-weight: 600; color: var(--text); font-family: 'IBM Plex Mono', monospace; }
+  .np-sub    { font-size: 11px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-state  {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .state-playing   { color: var(--success); border-color: var(--success); background: rgba(74,222,128,0.08); }
+  .state-paused    { color: var(--warn);    border-color: var(--warn);    background: rgba(251,146,60,0.08); }
+  .state-buffering { color: var(--info);    border-color: var(--info);    background: rgba(96,165,250,0.08); }
+  .state-unknown   { color: var(--muted);   border-color: var(--border);  }
+  .np-user {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .np-username { color: var(--text); font-weight: 500; }
+  .np-sep      { color: var(--border); }
+  .np-plex-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .np-plex-link:hover { opacity: 0.75; }
+  .np-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+  }
+  .np-progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .np-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.5s;
+  }
+  .np-pct       { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); width: 32px; text-align: right; flex-shrink: 0; }
+  .np-remaining { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .np-quality   { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); }
+  .np-ip-row    { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .np-ip        { color: var(--text); }
+  .np-map {
+    height: 120px;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .np-map-local {
+    height: 120px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--surface);
+  }
+  .np-map-local-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  /* Leaflet overrides for dark theme */
+  .leaflet-tile { filter: brightness(0.6) invert(1) hue-rotate(180deg) saturate(0.5); }
+  .leaflet-container { background: #1a1a1f; }
 </style>
 </head>
 <body>
@@ -443,10 +622,35 @@
       <polyline stroke="#e5a00d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="20,4 20,8 16,8"/>
     </svg>
     </a>
-    <h1>MEDIA SERVARR SYNC</h1>
-    <span class="subtitle">Manual trigger</span>
+    <div class="header-meta">
+      <h1>MEDIA SERVARR SYNC</h1>
+      <nav class="header-nav">
+        <a href="/" class="nav-link active">Sync</a>
+        <a href="/invites" class="nav-link">Invites</a>
+      </nav>
+    </div>
     <a class="logout" href="/logout">Logout</a>
   </header>
+
+  {% if demo %}
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;color:var(--warn);background:rgba(251,146,60,0.07);border:1px solid rgba(251,146,60,0.3);border-radius:var(--radius);padding:8px 14px;margin-bottom:20px;text-align:center;">
+    ⚠ Demo mode — showing sample data
+  </div>
+  {% endif %}
+
+  <div class="card" id="now-playing-card">
+    <div class="card-label" style="display:flex;align-items:center;gap:6px;">
+      Now Playing
+      <span id="stream-count" style="color:var(--muted);font-size:9px;"></span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+        <span id="np-countdown" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:0.05em;">10s</span>
+        <button type="button" id="np-refresh-btn" class="refresh-btn" title="Refresh now">↻</button>
+      </span>
+    </div>
+    <div id="now-playing-body">
+      <div class="np-empty">Loading…</div>
+    </div>
+  </div>
 
   <div class="card">
     <div class="card-label">Trigger path scan - (Path needs to be the same as your root path in sonarr or radarr)</div>
@@ -710,6 +914,210 @@ function jumpPage(form, maxPage) {
   form.page.value = val;
   return true;
 }
+</script>
+
+<!-- Leaflet JS (loaded after DOM for non-blocking) -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=" crossorigin=""></script>
+<script>
+/* ================================================================
+   Now Playing — sessions polling + Leaflet maps
+   ================================================================ */
+(function(){
+  var NP_INTERVAL = 10;
+  var npRemaining = NP_INTERVAL;
+  var npTick;
+  var activeMaps = {};
+
+  var npCountdownEl = document.getElementById('np-countdown');
+  var npBtn         = document.getElementById('np-refresh-btn');
+
+  function setNpCountdown(n) {
+    if (npCountdownEl) npCountdownEl.textContent = n + 's';
+  }
+
+  function fmtMs(ms) {
+    if (!ms || ms < 0) return '';
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+  }
+
+  function stateClass(st) {
+    return {playing:'state-playing', paused:'state-paused', buffering:'state-buffering'}[st] || 'state-unknown';
+  }
+  function stateLabel(st) {
+    return {playing:'▶ Playing', paused:'⏸ Paused', buffering:'⌛ Loading'}[st] || st;
+  }
+
+  function destroyMaps() {
+    Object.keys(activeMaps).forEach(function(k) {
+      try { activeMaps[k].remove(); } catch(e) {}
+    });
+    activeMaps = {};
+  }
+
+  function renderSessions(data) {
+    var container = document.getElementById('now-playing-body');
+    var countEl   = document.getElementById('stream-count');
+    if (!container) return;
+
+    destroyMaps();
+
+    var sessions   = data.sessions || [];
+    var machineId  = data.machine_id || '';
+
+    if (countEl) countEl.textContent = '(' + sessions.length + ' stream' + (sessions.length !== 1 ? 's' : '') + ')';
+
+    if (!sessions.length) {
+      container.innerHTML = '<div class="np-empty">No active streams</div>';
+      return;
+    }
+
+    var html = '';
+    sessions.forEach(function(s) {
+      var pct       = Math.min(100, Math.max(0, s.progress_pct || 0));
+      var remaining = fmtMs((s.duration_ms || 0) - (s.view_offset_ms || 0));
+      var sClass    = stateClass(s.state);
+      var sLabel    = stateLabel(s.state);
+      var ip        = s.player_address || s.player_remote_address || '';
+      // Sanitize session_id to alphanumeric so it is safe in HTML id/attribute contexts
+      var safeId = String(s.session_id).replace(/[^a-zA-Z0-9_-]/g, '');
+      var mapId  = 'np-map-' + safeId;
+
+      var plexUrl = '';
+      if (machineId && s.rating_key) {
+        plexUrl = '{{ plex_url }}/web/index.html#!/server/' + machineId
+                + '/details?key=' + encodeURIComponent(s.plex_item_key || '/library/metadata/' + s.rating_key);
+      }
+      var safePlexUrl = escHtml(plexUrl); // escape for use inside HTML attribute values
+
+      var posterHtml = s.thumb_key
+        ? '<a href="' + (safePlexUrl || '#') + '" target="_blank" rel="noopener">'
+          + '<img class="np-poster" src="' + escHtml('/api/thumb?key=' + encodeURIComponent(s.thumb_key) + '&w=72&h=108') + '" alt="poster" loading="lazy"></a>'
+        : '<div class="np-poster-ph">?</div>';
+
+      var safeYear  = parseInt(s.year, 10) || 0;
+
+      var titleHtml = '';
+      if (s.type === 'episode') {
+        titleHtml = '<div class="np-show">' + escHtml(s.show_title || s.title) + '</div>'
+          + (s.season_episode ? '<div class="np-sub">' + escHtml(s.season_episode)
+              + (s.title ? ' · ' + escHtml(s.title) : '') + '</div>' : '');
+      } else {
+        titleHtml = '<div class="np-title">' + escHtml(s.title)
+          + (safeYear ? ' <span class="np-year">(' + safeYear + ')</span>' : '') + '</div>';
+      }
+
+      var qualParts = [s.stream_type, s.video_resolution ? s.video_resolution.toUpperCase() : '',
+        s.bitrate_kbps ? (s.bitrate_kbps / 1000).toFixed(1) + ' Mbps' : ''].filter(Boolean);
+
+      var playerParts = [s.player_device, s.player_platform].filter(Boolean);
+
+      html += '<div class="np-session" data-sid="' + safeId + '">'
+        + '<div class="np-poster-wrap">' + posterHtml + '</div>'
+        + '<div class="np-info">'
+        +   '<div class="np-title-row">'
+        +     '<div class="np-titles">' + titleHtml + '</div>'
+        +     '<span class="np-state ' + sClass + '">' + sLabel + '</span>'
+        +   '</div>'
+        +   '<div class="np-user">'
+        +     '<span class="np-username">' + escHtml(s.user) + '</span>'
+        +     (playerParts.length ? '<span class="np-sep">·</span><span>' + escHtml(playerParts.join(' · ')) + '</span>' : '')
+        +     (safePlexUrl ? '<a href="' + safePlexUrl + '" target="_blank" rel="noopener" class="np-plex-link" title="Open in Plex">↗ Plex</a>' : '')
+        +   '</div>'
+        +   '<div class="np-progress-row">'
+        +     '<div class="np-progress-bar"><div class="np-progress-fill" style="width:' + pct + '%"></div></div>'
+        +     '<span class="np-pct">' + pct.toFixed(0) + '%</span>'
+        +     (remaining ? '<span class="np-remaining">' + remaining + ' left</span>' : '')
+        +   '</div>'
+        +   (qualParts.length ? '<div class="np-quality">' + escHtml(qualParts.join(' · ')) + '</div>' : '')
+        +   '<div class="np-ip-row">'
+        +     (ip ? '<span class="np-ip">' + escHtml(ip) + '</span>' : '')
+        +     '<span class="np-geo-text" id="geo-text-' + safeId + '"></span>'
+        +   '</div>'
+        + '</div>'
+        + '<div class="np-map-col"><div id="' + mapId + '"></div></div>'
+        + '</div>';
+    });
+
+    container.innerHTML = html;
+
+    // Geo lookup + map init for each session
+    sessions.forEach(function(s) {
+      var ip     = s.player_address || s.player_remote_address || '';
+      var safeId = String(s.session_id).replace(/[^a-zA-Z0-9_-]/g, '');
+      if (ip) initGeo(safeId, ip);
+    });
+  }
+
+  function escHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  }
+
+  async function initGeo(sessionId, ip) {
+    var mapId     = 'np-map-' + sessionId;
+    var geoTextEl = document.getElementById('geo-text-' + sessionId);
+    var mapEl     = document.getElementById(mapId);
+    try {
+      var res  = await fetch('/api/geoip?ip=' + encodeURIComponent(ip), {cache:'default'});
+      var geo  = await res.json();
+      if (geo.private) {
+        if (geoTextEl) geoTextEl.textContent = '· Local Network';
+        if (mapEl) mapEl.innerHTML = '<div class="np-map-local">'
+          + '<span style="font-size:20px">🏠</span>'
+          + '<span class="np-map-local-label">Local Network</span></div>';
+        return;
+      }
+      if (geo.status === 'success' && geo.lat && geo.lon) {
+        var location = [geo.city, geo.country].filter(Boolean).join(', ');
+        if (geoTextEl) geoTextEl.textContent = '· ' + location;
+        if (mapEl && typeof L !== 'undefined') {
+          mapEl.style.height = '120px';
+          var map = L.map(mapId, {
+            center: [geo.lat, geo.lon], zoom: 7,
+            zoomControl: false, attributionControl: false,
+            scrollWheelZoom: false, dragging: false,
+            touchZoom: false, doubleClickZoom: false,
+          });
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
+          L.circleMarker([geo.lat, geo.lon], {
+            radius: 6, color: '#e5a00d', fillColor: '#e5a00d', fillOpacity: 0.9, weight: 2
+          }).addTo(map);
+          activeMaps[sessionId] = map;
+        }
+      }
+    } catch(e) { /* geo not critical */ }
+  }
+
+  async function doNpRefresh() {
+    clearInterval(npTick);
+    if (npBtn) npBtn.classList.add('spinning');
+    try {
+      var res  = await fetch('/api/sessions', {cache:'no-store'});
+      if (res.ok) renderSessions(await res.json());
+    } catch(e) { /* ignore */ }
+    if (npBtn) npBtn.classList.remove('spinning');
+    startNpCountdown();
+  }
+
+  function startNpCountdown() {
+    npRemaining = NP_INTERVAL;
+    setNpCountdown(npRemaining);
+    npTick = setInterval(function() {
+      npRemaining--;
+      setNpCountdown(npRemaining);
+      if (npRemaining <= 0) doNpRefresh();
+    }, 1000);
+  }
+
+  if (npBtn) npBtn.addEventListener('click', doNpRefresh);
+  doNpRefresh();
+})();
 </script>
 </body>
 </html>

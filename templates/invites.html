@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invites · Plex Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><rect width='24' height='24' rx='4' fill='%230d0d0f'/><path stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' d='M20 12a8 8 0 1 1-1.6-4.8'/><polyline stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='20,4 20,8 16,8'/></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0d0d0f; --surface: #161618; --border: #2a2a2e;
+    --accent: #e5a00d; --accent-dim: rgba(229,160,13,0.12);
+    --text: #e8e8e8; --muted: #666;
+    --success: #4ade80; --warn: #fb923c; --error: #f87171; --info: #60a5fa;
+    --radius: 4px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 14px;
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; padding: 48px 20px;
+  }
+
+  .shell { width: 100%; max-width: 720px; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 36px; border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+  }
+  .logo-icon { flex-shrink: 0; filter: drop-shadow(0 0 6px rgba(229,160,13,0.5)); }
+  h1 {
+    font-family: 'IBM Plex Mono', monospace; font-size: 18px;
+    font-weight: 600; letter-spacing: 0.04em; color: var(--accent);
+  }
+  .header-meta { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+  .header-nav  { display: flex; gap: 6px; }
+  .nav-link {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); text-decoration: none;
+    padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .nav-link:hover  { color: var(--text); border-color: var(--text); }
+  .nav-link.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+  a.logout {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); text-decoration: none;
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  a.logout:hover { color: var(--error); border-color: var(--error); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; margin-bottom: 16px;
+  }
+  .card-label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 18px;
+  }
+
+  /* ---- form ---- */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 520px) { .form-grid { grid-template-columns: 1fr; } }
+
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field-full { grid-column: 1 / -1; }
+  label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
+  input[type="text"], input[type="number"], select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 8px 12px; outline: none; transition: border-color 0.15s; width: 100%;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  select option { background: var(--bg); }
+
+  .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+  .check-item {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text);
+    cursor: pointer;
+  }
+  .check-item input[type="checkbox"] {
+    width: 14px; height: 14px; padding: 0; cursor: pointer; accent-color: var(--accent);
+  }
+  .check-hint { font-size: 10px; color: var(--muted); margin-left: 22px; margin-top: -4px; }
+
+  .lib-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px;
+  }
+  .lib-item {
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 6px 10px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .lib-item:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+  .lib-item input[type="checkbox"] { width: 12px; height: 12px; padding: 0; accent-color: var(--accent); }
+  .lib-type { font-size: 9px; color: var(--muted); margin-left: auto; }
+
+  button[type="submit"] {
+    background: var(--accent); border: none; border-radius: var(--radius);
+    color: #0d0d0f; font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+    padding: 10px 20px; cursor: pointer; text-transform: uppercase;
+    transition: opacity 0.15s; white-space: nowrap;
+  }
+  button[type="submit"]:hover { opacity: 0.85; }
+
+  /* ---- invite list ---- */
+  .invite-row {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 14px 0; border-bottom: 1px solid var(--border);
+  }
+  .invite-row:last-child { border-bottom: none; }
+  .invite-top  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .invite-label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    font-weight: 600; color: var(--text);
+  }
+  .invite-status {
+    font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 3px; border: 1px solid;
+  }
+  .status-active   { color: var(--success); border-color: var(--success); background: rgba(74,222,128,0.08); }
+  .status-revoked  { color: var(--error);   border-color: var(--error);   background: rgba(248,113,113,0.08); }
+  .status-expired  { color: var(--muted);   border-color: var(--border);  }
+  .status-full     { color: var(--warn);    border-color: var(--warn);    background: rgba(251,146,60,0.08); }
+
+  .invite-link-row { display: flex; align-items: center; gap: 8px; }
+  .invite-link {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted);
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 5px 10px; flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .btn-copy {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.05em; padding: 5px 10px;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s; white-space: nowrap;
+  }
+  .btn-copy:hover       { color: var(--accent); border-color: var(--accent); }
+  .btn-copy.copied      { color: var(--success); border-color: var(--success); }
+
+  .invite-meta {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted);
+  }
+  .invite-meta span { display: flex; align-items: center; gap: 3px; }
+
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 9px;
+    font-weight: 500; letter-spacing: 0.03em;
+  }
+  .badge-yes { background: rgba(74,222,128,0.1);  color: var(--success); border: 1px solid rgba(74,222,128,0.25); }
+  .badge-no  { background: rgba(102,102,102,0.1); color: var(--muted);   border: 1px solid var(--border); }
+  .badge-lib { background: rgba(96,165,250,0.1);  color: var(--info);    border: 1px solid rgba(96,165,250,0.25); }
+
+  .btn-revoke {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; letter-spacing: 0.05em; padding: 4px 10px;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-revoke:hover { color: var(--error); border-color: var(--error); }
+
+  /* ---- grants / accepted users ---- */
+  .grants-toggle {
+    background: none; border: none; color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    cursor: pointer; padding: 0; text-decoration: underline;
+    text-underline-offset: 2px; transition: color 0.15s;
+  }
+  .grants-toggle:hover { color: var(--text); }
+  .grants-list { margin-top: 8px; display: none; }
+  .grants-list.open { display: block; }
+  .grant-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  }
+  .grant-row:last-child { border-bottom: none; }
+  .grant-user  { color: var(--text); font-weight: 500; }
+  .grant-date  { color: var(--muted); font-size: 10px; }
+  .grant-exp   { color: var(--warn);  font-size: 10px; }
+  .grant-rev   { color: var(--error); font-size: 10px; }
+  .grant-actions { margin-left: auto; }
+
+  .empty { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: center; padding: 16px 0; }
+
+  .alert-warn {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 10px 14px; border-radius: var(--radius);
+    border-left: 3px solid var(--warn); color: var(--warn);
+    background: rgba(251,146,60,0.07); margin-bottom: 14px;
+  }
+
+  /* back to top */
+  #back-to-top {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace; font-size: 14px;
+    padding: 8px 12px; cursor: pointer; opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, border-color 0.15s; z-index: 100;
+  }
+  #back-to-top.visible { opacity: 1; pointer-events: auto; }
+  #back-to-top:hover   { border-color: var(--accent); background: var(--accent-dim); }
+</style>
+</head>
+<body>
+<button id="back-to-top" title="Back to top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ Top</button>
+
+<div class="shell">
+  <header>
+    <a href="/" style="display:inline-flex;align-items:center;" title="Home">
+      <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="28" height="28">
+        <rect width="24" height="24" rx="4" fill="#0d0d0f"/>
+        <path stroke="#e5a00d" stroke-width="2" stroke-linecap="round" d="M20 12a8 8 0 1 1-1.6-4.8"/>
+        <polyline stroke="#e5a00d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="20,4 20,8 16,8"/>
+      </svg>
+    </a>
+    <div class="header-meta">
+      <h1>MEDIA SERVARR SYNC</h1>
+      <nav class="header-nav">
+        <a href="/" class="nav-link">Sync</a>
+        <a href="/invites" class="nav-link active">Invites</a>
+      </nav>
+    </div>
+    <a class="logout" href="/logout">Logout</a>
+  </header>
+
+  {% if demo %}
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;color:var(--warn);background:rgba(251,146,60,0.07);border:1px solid rgba(251,146,60,0.3);border-radius:var(--radius);padding:8px 14px;margin-bottom:20px;text-align:center;">
+    ⚠ Demo mode — showing sample data
+  </div>
+  {% endif %}
+
+  {% if plex_error %}
+  <div class="alert-warn">Plex connection error: {{ plex_error }}. Library list may be unavailable.</div>
+  {% endif %}
+
+  <!-- Create Invite -->
+  <div class="card">
+    <div class="card-label">Create Invite Link</div>
+    <form method="post" action="/invites/create"> {# nosemgrep: django-no-csrf-token #}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+
+        <!-- Label -->
+        <div class="field field-full">
+          <label for="inv-label">Label (internal reference)</label>
+          <input type="text" id="inv-label" name="label" placeholder="e.g. John Smith" autocomplete="off">
+        </div>
+
+        <!-- Libraries -->
+        <div class="field field-full">
+          <label>Libraries <span style="font-weight:400;text-transform:none;letter-spacing:0">(leave all unchecked to grant access to everything)</span></label>
+          {% if libraries %}
+          <div class="lib-grid">
+            {% for lib in libraries %}
+            <label class="lib-item">
+              <input type="checkbox" name="sections" value="{{ lib.id }}">
+              {{ lib.title }}
+              <span class="lib-type">{{ lib.type }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);">
+            Connect Plex to show library list. All libraries will be shared.
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Permissions -->
+        <div class="field">
+          <label>Permissions</label>
+          <div class="checkbox-group">
+            <label class="check-item">
+              <input type="checkbox" name="allow_sync">
+              Allow Downloads (Sync)
+            </label>
+            <div class="check-hint">Let the user download media for offline viewing</div>
+            <label class="check-item">
+              <input type="checkbox" name="allow_channels" checked>
+              Live TV &amp; Channels
+            </label>
+            <div class="check-hint">Access to live TV, DVR, and Plex channels</div>
+            <label class="check-item">
+              <input type="checkbox" name="home_user">
+              Add to Plex Home
+            </label>
+            <div class="check-hint">Grants managed account access (requires Plex Pass)</div>
+          </div>
+        </div>
+
+        <!-- Duration + Uses -->
+        <div class="field">
+          <label>Access Duration (after accepting)</label>
+          <select name="duration_days">
+            <option value="0">Permanent</option>
+            <option value="30">30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+            <option value="180">6 months</option>
+            <option value="365">1 year</option>
+          </select>
+
+          <label style="margin-top:12px;">Link Expires In</label>
+          <select name="link_expires_days">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+            <option value="0">Never</option>
+          </select>
+
+          <label style="margin-top:12px;">Max Uses</label>
+          <input type="number" name="max_uses" value="1" min="0" style="width:100px;">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-top:3px;">0 = unlimited</div>
+        </div>
+
+        <div class="field field-full" style="margin-top:6px;">
+          <button type="submit">Create Invite Link</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Invite List -->
+  <div class="card">
+    <div class="card-label">Active &amp; Past Invites ({{ invites | length }})</div>
+    {% if invites %}
+      {% for inv in invites %}
+      <div class="invite-row">
+        <div class="invite-top">
+          <span class="invite-label">{{ inv.label or '(unlabeled)' }}</span>
+          {% if inv.is_active %}
+            <span class="invite-status status-active">Active</span>
+          {% elif inv.status == 'revoked' %}
+            <span class="invite-status status-revoked">Revoked</span>
+          {% elif inv.link_expired %}
+            <span class="invite-status status-expired">Link Expired</span>
+          {% elif inv.max_reached %}
+            <span class="invite-status status-full">Uses Exhausted</span>
+          {% endif %}
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-left:auto;">
+            Uses: {{ inv.uses }}/{{ inv.max_uses if inv.max_uses else '∞' }}
+          </span>
+        </div>
+
+        {% set invite_url = request.host_url.rstrip('/') + '/invite/' + inv.token %}
+        <div class="invite-link-row">
+          <div class="invite-link" id="ilink-{{ inv.id }}">{{ invite_url }}</div>
+          <button class="btn-copy" onclick="copyLink('ilink-{{ inv.id }}', this)">Copy Link</button>
+          {% if inv.is_active %}
+          <form method="post" action="/invites/revoke/{{ inv.token }}" style="display:inline;" onsubmit="return confirm('Revoke this invite link?')"> {# nosemgrep: django-no-csrf-token #}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn-revoke">Revoke</button>
+          </form>
+          {% endif %}
+        </div>
+
+        <div class="invite-meta">
+          <span>Created: {{ inv.created_at | datetimeformat }}</span>
+          {% if inv.link_expires_at %}
+          <span>Link expires: {{ inv.link_expires_at | datetimeformat }}</span>
+          {% endif %}
+          {% if inv.duration_days %}
+          <span>Access: {{ inv.duration_days }} days after joining</span>
+          {% else %}
+          <span>Access: Permanent</span>
+          {% endif %}
+          <span>
+            Downloads: <span class="badge {{ 'badge-yes' if inv.allow_sync else 'badge-no' }}">{{ 'Yes' if inv.allow_sync else 'No' }}</span>
+          </span>
+          <span>
+            Live TV: <span class="badge {{ 'badge-yes' if inv.allow_channels else 'badge-no' }}">{{ 'Yes' if inv.allow_channels else 'No' }}</span>
+          </span>
+          <span>
+            Home: <span class="badge {{ 'badge-yes' if inv.home_user else 'badge-no' }}">{{ 'Yes' if inv.home_user else 'No' }}</span>
+          </span>
+        </div>
+
+        {% if inv.section_names %}
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">
+          {% for lib in inv.section_names %}
+          <span class="badge badge-lib">{{ lib }}</span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);">All libraries</div>
+        {% endif %}
+
+        {% if inv.grants %}
+        <div>
+          <button class="grants-toggle" onclick="toggleGrants(this)">
+            ▸ {{ inv.grants | length }} accepted user{{ 's' if inv.grants | length != 1 else '' }}
+          </button>
+          <div class="grants-list">
+            {% for g in inv.grants %}
+            <div class="grant-row">
+              <span class="grant-user">{{ g.plex_username }}</span>
+              <span class="grant-date">Joined {{ g.accepted_at | datetimeformat }}</span>
+              {% if g.revoked %}
+                <span class="grant-rev">Access revoked</span>
+              {% elif g.access_expires_at %}
+                <span class="grant-exp">Expires {{ g.access_expires_at | datetimeformat }}</span>
+              {% else %}
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--success);">Permanent access</span>
+              {% endif %}
+              <div class="grant-actions">
+                {% if not g.revoked %}
+                <form method="post" action="/invites/revoke_grant/{{ g.id }}" style="display:inline;" data-confirm="Revoke Plex access for {{ g.plex_username }}?" onsubmit="return confirm(this.dataset.confirm)"> {# nosemgrep: django-no-csrf-token #}
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn-revoke">Revoke</button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">No invites created yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function copyLink(elId, btn) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent.trim()).then(function() {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'Copy Link';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function toggleGrants(btn) {
+  var list = btn.nextElementSibling;
+  var open = list.classList.toggle('open');
+  btn.textContent = (open ? '▾ ' : '▸ ') + btn.textContent.slice(2);
+}
+
+var btt = document.getElementById('back-to-top');
+if (btt) window.addEventListener('scroll', function() {
+  btt.classList.toggle('visible', window.scrollY > 300);
+});
+</script>
+</body>
+</html>

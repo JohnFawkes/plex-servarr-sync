@@ -37,9 +37,15 @@ Sonarr / Radarr  →  media-servarr-sync  →  [rclone vfs/forget + vfs/refresh]
 
 ## **📷Screenshots**
 
-* **WebUI**
+* **Login**
+![Login](screenshots/login.png)
+
+* **Dashboard (Sync History + Now Playing)**
 ![WebUI](screenshots/webui.png)
 ![Episode Count Hover](screenshots/episode_count.png)
+
+* **Invite Management**
+![Invites](screenshots/invites.png)
 
 ## Quick Start
 

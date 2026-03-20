@@ -24,6 +24,8 @@ import logging
 import signal
 import sys
 import sqlite3
+import ipaddress
+import secrets as _secrets
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -82,6 +84,15 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 csrf = CSRFProtect(app)
+
+
+@app.template_filter('datetimeformat')
+def _datetimeformat(ts):
+    """Format a Unix timestamp as a local date/time string."""
+    try:
+        return datetime.fromtimestamp(int(ts), tz=LOCAL_TZ).strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        return str(ts) if ts else ''
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,6 +157,8 @@ MANUAL_USER     = os.getenv("MANUAL_USER", "admin")
 MANUAL_PASS     = os.getenv("MANUAL_PASS", "password")
 # Used to sign session cookies — set a long random string in your .env
 SECRET_KEY      = os.getenv("SECRET_KEY", os.urandom(24).hex())
+# Demo mode: enables /login/demo and populates pages with fake data for screenshots
+DEMO_MODE       = os.getenv("DEMO_MODE", "false").strip().lower() in ("1", "true", "yes")
 
 # Optional Sonarr/Radarr API credentials — used to look up quality profile names.
 # If unset, quality_profile badges are simply omitted.
@@ -153,6 +166,10 @@ SONARR_URL     = os.getenv("SONARR_URL", "").rstrip('/')
 SONARR_API_KEY = os.getenv("SONARR_API_KEY", "")
 RADARR_URL     = os.getenv("RADARR_URL", "").rstrip('/')
 RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
+
+# Onboarding / offboarding links shown on the invite page
+ONBOARD_WIKI_URL    = os.getenv("ONBOARD_WIKI_URL", "").rstrip('/')
+ONBOARD_REQUEST_URL = os.getenv("ONBOARD_REQUEST_URL", "").rstrip('/')
 
 # Rclone — set USE_RCLONE=false to skip all rclone calls entirely
 USE_RCLONE        = os.getenv("USE_RCLONE", "false").strip().lower() in ("1", "true", "yes")
@@ -189,6 +206,19 @@ _qp_lock = threading.Lock()
 
 _cf_cache: dict[str, list] = {}   # arr_type → [{id, name, ...}, ...]
 _cf_lock  = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Geo-IP cache (server-side proxy to ip-api.com)
+# ---------------------------------------------------------------------------
+_geo_cache: dict[str, dict] = {}   # ip → {status, city, country, lat, lon, ...}
+_geo_cache_lock = threading.Lock()
+
+
+def _is_private_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return True
 
 
 def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
@@ -481,7 +511,139 @@ class SyncHistory:
         }
 
 
+class InviteDB:
+    """SQLite-backed invite system with per-user grant tracking and auto-expiry."""
+
+    def __init__(self, db_path: str = "/data/invites.db"):
+        self._db_path = db_path
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self):
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS invites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token TEXT UNIQUE NOT NULL,
+                    label TEXT DEFAULT '',
+                    section_ids TEXT DEFAULT '[]',
+                    allow_sync INTEGER DEFAULT 0,
+                    allow_channels INTEGER DEFAULT 1,
+                    home_user INTEGER DEFAULT 0,
+                    duration_days INTEGER DEFAULT 0,
+                    max_uses INTEGER DEFAULT 1,
+                    uses INTEGER DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    link_expires_at INTEGER,
+                    status TEXT DEFAULT 'active'
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS invite_grants (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invite_id INTEGER NOT NULL,
+                    plex_username TEXT NOT NULL,
+                    accepted_at INTEGER NOT NULL,
+                    access_expires_at INTEGER,
+                    revoked INTEGER DEFAULT 0,
+                    FOREIGN KEY (invite_id) REFERENCES invites(id)
+                )
+            """)
+            conn.commit()
+
+    def create(self, label: str, section_ids: list, allow_sync: bool,
+               allow_channels: bool, home_user: bool, duration_days: int,
+               max_uses: int, link_expires_days: int) -> str:
+        token = _secrets.token_urlsafe(16)
+        link_exp = int(time.time() + link_expires_days * 86400) if link_expires_days else None
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("""
+                    INSERT INTO invites
+                        (token, label, section_ids, allow_sync, allow_channels, home_user,
+                         duration_days, max_uses, created_at, link_expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (token, label, json.dumps(section_ids), int(allow_sync),
+                      int(allow_channels), int(home_user), duration_days,
+                      max_uses, int(time.time()), link_exp))
+                conn.commit()
+        return token
+
+    def get(self, token: str) -> Optional[dict]:
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM invites WHERE token = ?", (token,)).fetchone()
+                return dict(row) if row else None
+
+    def list_all(self) -> list:
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT * FROM invites ORDER BY created_at DESC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+
+    def record_acceptance(self, invite_id: int, plex_username: str, duration_days: int):
+        access_exp = int(time.time() + duration_days * 86400) if duration_days else None
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("""
+                    INSERT INTO invite_grants
+                        (invite_id, plex_username, accepted_at, access_expires_at)
+                    VALUES (?, ?, ?, ?)
+                """, (invite_id, plex_username, int(time.time()), access_exp))
+                conn.execute("UPDATE invites SET uses = uses + 1 WHERE id = ?", (invite_id,))
+                conn.commit()
+
+    def get_grants(self, invite_id: Optional[int] = None) -> list:
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                if invite_id is not None:
+                    rows = conn.execute(
+                        "SELECT * FROM invite_grants WHERE invite_id = ? ORDER BY accepted_at DESC",
+                        (invite_id,)
+                    ).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT g.*, i.label AS invite_label, i.token AS invite_token
+                        FROM invite_grants g
+                        JOIN invites i ON i.id = g.invite_id
+                        ORDER BY g.accepted_at DESC
+                    """).fetchall()
+                return [dict(r) for r in rows]
+
+    def revoke_invite(self, token: str):
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("UPDATE invites SET status = 'revoked' WHERE token = ?", (token,))
+                conn.commit()
+
+    def revoke_grant(self, grant_id: int):
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute("UPDATE invite_grants SET revoked = 1 WHERE id = ?", (grant_id,))
+                conn.commit()
+
+    def get_expired_grants(self) -> list:
+        now = int(time.time())
+        with self._lock:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT * FROM invite_grants
+                    WHERE access_expires_at IS NOT NULL
+                      AND access_expires_at < ?
+                      AND revoked = 0
+                """, (now,)).fetchall()
+                return [dict(r) for r in rows]
+
+
 history = SyncHistory(db_path="/data/sync_history.db", retention_days=HISTORY_DAYS)
+invite_db = InviteDB(db_path="/data/invites.db")
 sync_queue: queue.Queue = queue.Queue()
 _in_flight: dict = {}           # mapped_folder -> SyncTask, currently queued or being processed
 _cooldown: dict = {}            # mapped_folder -> expiry monotonic timestamp, recently completed
@@ -698,6 +860,35 @@ def custom_format_refresh_scheduler() -> None:
             time.sleep(1)
 
     log.info("Custom format scheduler stopped")
+
+
+def invite_expiry_scheduler() -> None:
+    """Background thread: auto-revoke expired Plex access grants once per hour."""
+    log.info("Invite expiry scheduler started")
+    # Initial delay before first check
+    deadline = time.monotonic() + 60
+    while _worker_alive.is_set() and time.monotonic() < deadline:
+        time.sleep(1)
+    while _worker_alive.is_set():
+        try:
+            expired = invite_db.get_expired_grants()
+            for grant in expired:
+                try:
+                    plex_instance = get_plex()
+                    if plex_instance:
+                        account = plex_instance.myPlexAccount()
+                        account.removeFriend(grant['plex_username'])
+                        log.info("[INVITE] Auto-revoked expired access for '%s'", grant['plex_username'])
+                    invite_db.revoke_grant(grant['id'])
+                except Exception as exc:
+                    log.warning("[INVITE] Error auto-revoking '%s': %s",
+                                grant.get('plex_username'), exc)
+        except Exception as exc:
+            log.error("[INVITE] Expiry scheduler error: %s", exc)
+        deadline = time.monotonic() + 3600
+        while _worker_alive.is_set() and time.monotonic() < deadline:
+            time.sleep(1)
+    log.info("Invite expiry scheduler stopped")
 
 
 def _find_plex_item(plex_instance, library, task: SyncTask):
@@ -1077,6 +1268,143 @@ def process_webhook(data: dict, instance_type: str):
 
 
 # ---------------------------------------------------------------------------
+# Demo mode — fake data for screenshots / public demos
+# ---------------------------------------------------------------------------
+
+_DEMO_INVITES = [
+    {
+        "id": 1, "token": "demoABC123", "label": "Friends & Family",
+        "section_ids": '["1","2"]', "section_names": ["TV Shows", "Movies"],
+        "allow_sync": 0, "allow_channels": 1, "home_user": 0,
+        "duration_days": 0, "max_uses": 10, "uses": 3,
+        "created_at": 1736000000, "link_expires_at": None, "status": "active",
+        "link_expired": False, "max_reached": False, "is_active": True,
+        "grants": [
+            {"id": 1, "invite_id": 1, "plex_username": "alice", "accepted_at": 1736100000, "access_expires_at": None, "revoked": 0},
+            {"id": 2, "invite_id": 1, "plex_username": "bob",   "accepted_at": 1736200000, "access_expires_at": None, "revoked": 0},
+            {"id": 3, "invite_id": 1, "plex_username": "charlie","accepted_at": 1736300000,"access_expires_at": None, "revoked": 0},
+        ],
+    },
+    {
+        "id": 2, "token": "demoXYZ789", "label": "30-day trial",
+        "section_ids": '["2"]', "section_names": ["Movies"],
+        "allow_sync": 0, "allow_channels": 0, "home_user": 0,
+        "duration_days": 30, "max_uses": 1, "uses": 1,
+        "created_at": 1735000000, "link_expires_at": 1738000000, "status": "active",
+        "link_expired": True, "max_reached": True, "is_active": False,
+        "grants": [
+            {"id": 4, "invite_id": 2, "plex_username": "diana", "accepted_at": 1735100000, "access_expires_at": 1737700000, "revoked": 0},
+        ],
+    },
+]
+
+_DEMO_SESSIONS = [
+    {
+        "user": "john", "title": "Ozymandias", "show": "Breaking Bad",
+        "episode": "S05 · E14", "type": "episode", "player": "Plex for Apple TV",
+        "state": "playing", "progress_pct": 42,
+        "duration_str": "47:12", "position_str": "19:50",
+        "quality": "1080p", "stream_type": "Direct Play", "transcode": False,
+    },
+    {
+        "user": "sarah", "title": "Dune: Part Two", "show": None,
+        "episode": None, "type": "movie", "player": "Plex Web",
+        "state": "playing", "progress_pct": 68,
+        "duration_str": "2:46:00", "position_str": "1:52:53",
+        "quality": "4K", "stream_type": "Direct Stream", "transcode": False,
+    },
+    {
+        "user": "mike", "title": "Napkins", "show": "The Bear",
+        "episode": "S03 · E01", "type": "episode", "player": "Plex for Android",
+        "state": "paused", "progress_pct": 15,
+        "duration_str": "39:04", "position_str": "5:51",
+        "quality": "720p", "stream_type": "Transcode", "transcode": True,
+    },
+]
+
+
+def _demo_history() -> list:
+    """Return fake sync history entries for demo/screenshot mode."""
+    from datetime import timedelta
+    now = now_local()
+    raw = [
+        {
+            "ts": (now - timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "SONARR", "status": "ok", "error": "", "duration_s": 3.2,
+            "path": "/media/tv/Breaking Bad (2008)/Season 5/",
+            "episode": "Breaking.Bad.S05E14.Ozymandias.1080p.BluRay.mkv",
+            "quality": "Bluray-1080p", "custom_formats": '["HDR", "DV"]',
+            "quality_profile": "HD-1080p Remux",
+        },
+        {
+            "ts": (now - timedelta(minutes=18)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "SONARR", "status": "ok", "error": "", "duration_s": 4.1,
+            "path": "/media/tv/The Bear (2022)/Season 3/",
+            "episode": '["The.Bear.S03E01.Napkins.1080p.WEB-DL.mkv","The.Bear.S03E02.Bolognese.1080p.WEB-DL.mkv","The.Bear.S03E03.Doors.And.Windows.1080p.WEB-DL.mkv"]',
+            "quality": "WEB-DL-1080p", "custom_formats": '["HLG"]',
+            "quality_profile": "WEB-1080p",
+        },
+        {
+            "ts": (now - timedelta(hours=1, minutes=5)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "RADARR", "status": "ok", "error": "", "duration_s": 5.7,
+            "path": "/media/movies/Dune Part Two (2024)/",
+            "episode": "", "quality": "Bluray-2160p",
+            "custom_formats": '["HDR10+", "DV", "Remux"]',
+            "quality_profile": "UHD Remux",
+        },
+        {
+            "ts": (now - timedelta(hours=2, minutes=32)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "SONARR", "status": "ok", "error": "", "duration_s": 2.8,
+            "path": "/media/tv/Severance (2022)/Season 2/",
+            "episode": "Severance.S02E04.Woes.Hollow.1080p.ATVP.WEB-DL.mkv",
+            "quality": "WEB-DL-1080p", "custom_formats": '["ATMOS"]',
+            "quality_profile": "WEB-1080p",
+        },
+        {
+            "ts": (now - timedelta(hours=4, minutes=17)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "RADARR", "status": "error",
+            "error": "ReadTimeout: Plex did not respond within 60s",
+            "duration_s": 60.0,
+            "path": "/media/movies/Avatar The Way of Water (2022)/",
+            "episode": "", "quality": "Bluray-2160p",
+            "custom_formats": '["HDR10", "DV"]', "quality_profile": "UHD Remux",
+        },
+        {
+            "ts": (now - timedelta(hours=6, minutes=44)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "SONARR", "status": "ok", "error": "", "duration_s": 3.5,
+            "path": "/media/tv/Shogun (2024)/Season 1/",
+            "episode": "Shogun.S01E05.Crimson.Sky.1080p.DSNP.WEB-DL.mkv",
+            "quality": "WEB-DL-1080p", "custom_formats": '[]',
+            "quality_profile": "WEB-1080p",
+        },
+        {
+            "ts": (now - timedelta(hours=9, minutes=11)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "RADARR", "status": "ok", "error": "", "duration_s": 4.3,
+            "path": "/media/movies/Oppenheimer (2023)/",
+            "episode": "", "quality": "Bluray-1080p",
+            "custom_formats": '["ATMOS", "TrueHD"]', "quality_profile": "HD-1080p Remux",
+        },
+        {
+            "ts": (now - timedelta(hours=11, minutes=58)).strftime("%Y-%m-%dT%H:%M:%S"),
+            "label": "MANUAL", "status": "ok", "error": "", "duration_s": 2.1,
+            "path": "/media/tv/The Last of Us (2023)/Season 1/",
+            "episode": "The.Last.of.Us.S01E01.When.Youre.Lost.in.the.Darkness.1080p.WEB-DL.mkv",
+            "quality": "WEB-DL-1080p", "custom_formats": '[]', "quality_profile": "",
+        },
+    ]
+    for item in raw:
+        display, ep_list = _parse_episode_field(item.get('episode', ''))
+        item['episode_display'] = display
+        item['episode_list'] = ep_list
+        cf_raw = item.get('custom_formats', '') or ''
+        try:
+            item['custom_format_list'] = json.loads(cf_raw) if cf_raw else []
+        except (json.JSONDecodeError, ValueError):
+            item['custom_format_list'] = []
+    return raw
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -1090,6 +1418,16 @@ def webhook_sonarr():
 @csrf.exempt
 def webhook_radarr():
     return process_webhook(request.get_json(silent=True) or {}, "radarr")
+
+
+@app.route('/login/demo')
+def login_demo():
+    if not DEMO_MODE:
+        return redirect(url_for('login'))
+    session.permanent = False
+    session['authenticated'] = True
+    session['demo'] = True
+    return redirect(url_for('manual_webhook'))
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1149,12 +1487,17 @@ def manual_webhook():
     per_page = 25
     offset = (page - 1) * per_page
 
-    recent = history.get_recent(limit=per_page, offset=offset, search=search_q,
-                                status_filter=status_filter, quality_filter=quality_filter,
-                                profile_filter=profile_filter)
-    total_count = history.count(search=search_q, status_filter=status_filter,
-                                quality_filter=quality_filter, profile_filter=profile_filter)
-    total_pages = (total_count + per_page - 1) // per_page
+    if session.get('demo'):
+        recent = _demo_history()
+        total_count = len(recent)
+        total_pages = 1
+    else:
+        recent = history.get_recent(limit=per_page, offset=offset, search=search_q,
+                                    status_filter=status_filter, quality_filter=quality_filter,
+                                    profile_filter=profile_filter)
+        total_count = history.count(search=search_q, status_filter=status_filter,
+                                    quality_filter=quality_filter, profile_filter=profile_filter)
+        total_pages = (total_count + per_page - 1) // per_page
 
     for item in recent:
         display, ep_list = _parse_episode_field(item.get('episode', ''))
@@ -1195,7 +1538,70 @@ def manual_webhook():
         filter_qs=filter_qs,
         no_quality_qs=no_quality_qs,
         no_profile_qs=no_profile_qs,
+        plex_url=PLEX_URL,
+        demo=session.get('demo', False),
     )
+
+
+@app.route('/now-playing')
+@requires_auth
+def now_playing():
+    demo = session.get('demo', False)
+    if demo:
+        sessions = _DEMO_SESSIONS
+    else:
+        sessions = []
+        try:
+            plex_instance = get_plex()
+            if plex_instance:
+                for s in plex_instance.sessions():
+                    players = getattr(s, 'players', [])
+                    player = players[0] if players else None
+                    ts_list = getattr(s, 'transcodeSessions', [])
+                    ts = ts_list[0] if ts_list else None
+                    media_type = getattr(s, 'type', 'unknown')
+                    season_ep = None
+                    if media_type == 'episode':
+                        si, ei = getattr(s, 'parentIndex', None), getattr(s, 'index', None)
+                        if si is not None and ei is not None:
+                            season_ep = f"S{int(si):02d} · E{int(ei):02d}"
+                    view_offset = getattr(s, 'viewOffset', 0) or 0
+                    duration = getattr(s, 'duration', 0) or 0
+                    progress_pct = round(view_offset / duration * 100, 1) if duration else 0
+                    if ts:
+                        vd = getattr(ts, 'videoDecision', 'directplay')
+                        stream_type = {'directplay': 'Direct Play', 'copy': 'Direct Stream',
+                                       'transcode': 'Transcode'}.get(vd, 'Direct Play')
+                        transcode = vd == 'transcode'
+                    else:
+                        stream_type, transcode = 'Direct Play', False
+                    quality = ''
+                    if getattr(s, 'media', None):
+                        res = getattr(s.media[0], 'videoResolution', '') or ''
+                        quality = (res + 'p') if res.isdigit() else res
+
+                    def _ms(ms):
+                        ms = ms or 0
+                        h, rem = divmod(ms // 1000, 3600)
+                        m, sec = divmod(rem, 60)
+                        return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+                    usernames = getattr(s, 'usernames', [])
+                    sessions.append({
+                        "user": usernames[0] if usernames else "Unknown",
+                        "title": getattr(s, 'title', ''),
+                        "show": getattr(s, 'grandparentTitle', None) if media_type == 'episode' else None,
+                        "episode": season_ep, "type": media_type,
+                        "player": getattr(player, 'title', '') if player else '',
+                        "state": getattr(player, 'state', 'playing') if player else 'playing',
+                        "progress_pct": progress_pct,
+                        "duration_str": _ms(duration) if duration else '--',
+                        "position_str": _ms(view_offset),
+                        "quality": quality, "stream_type": stream_type, "transcode": transcode,
+                    })
+        except Exception as exc:
+            log.warning("Failed to fetch Plex sessions for /now-playing: %s", exc)
+    return render_template('now_playing.html', sessions=sessions, demo=demo)
 
 
 @app.route('/health', methods=['GET'])
@@ -1259,6 +1665,420 @@ def api_stats():
 
 
 # ---------------------------------------------------------------------------
+# Sessions / Now Playing API
+# ---------------------------------------------------------------------------
+
+@app.route('/api/sessions', methods=['GET'])
+@requires_auth
+def api_sessions():
+    """Return current Plex sessions for the Now Playing dashboard."""
+    if session.get('demo'):
+        demo_result = []
+        for s in _DEMO_SESSIONS:
+            demo_result.append({
+                'session_id': f"demo-{s['user']}",
+                'rating_key': '', 'plex_item_key': '', 'type': s['type'],
+                'title': s['title'], 'year': None,
+                'show_title': s.get('show'), 'season_episode': s.get('episode'),
+                'thumb_key': None,
+                'progress_pct': s['progress_pct'],
+                'view_offset_ms': 0, 'duration_ms': 0,
+                'state': s['state'], 'stream_type': s['stream_type'],
+                'video_resolution': s['quality'].replace('p','') if s['quality'].endswith('p') else s['quality'],
+                'bitrate_kbps': None,
+                'user': s['user'],
+                'player_device': s['player'], 'player_platform': '', 'player_product': '',
+                'player_address': '', 'player_remote_address': '',
+            })
+        return jsonify({'sessions': demo_result, 'machine_id': ''})
+    plex_instance = get_plex()
+    if not plex_instance:
+        return jsonify({"error": "Plex not connected", "sessions": []}), 503
+    try:
+        sessions_data = plex_instance.sessions()
+        result = []
+        machine_id = getattr(plex_instance, 'machineIdentifier', '')
+        for s in sessions_data:
+            players = getattr(s, 'players', [])
+            player = players[0] if players else None
+            transcode_sessions = getattr(s, 'transcodeSessions', [])
+            ts = transcode_sessions[0] if transcode_sessions else None
+
+            media_type = getattr(s, 'type', 'unknown')
+
+            season_ep = None
+            if media_type == 'episode':
+                season = getattr(s, 'parentIndex', None)
+                episode = getattr(s, 'index', None)
+                if season and episode:
+                    season_ep = f"S{int(season):02d}E{int(episode):02d}"
+
+            # Prefer show poster for episodes
+            if media_type == 'episode':
+                thumb_key = getattr(s, 'grandparentThumb', None) or getattr(s, 'thumb', None)
+            else:
+                thumb_key = getattr(s, 'thumb', None)
+
+            view_offset = getattr(s, 'viewOffset', 0) or 0
+            duration = getattr(s, 'duration', 0) or 0
+            progress_pct = round((view_offset / duration * 100), 1) if duration > 0 else 0
+
+            if ts:
+                vd = getattr(ts, 'videoDecision', 'directplay')
+                stream_type = {
+                    'directplay': 'Direct Play',
+                    'copy': 'Direct Stream',
+                    'transcode': 'Transcode',
+                }.get(vd, vd.title() if vd else 'Direct Play')
+            else:
+                stream_type = 'Direct Play'
+
+            media_parts = getattr(s, 'media', [])
+            video_resolution = None
+            bitrate = None
+            if media_parts:
+                video_resolution = getattr(media_parts[0], 'videoResolution', None)
+                bitrate = getattr(media_parts[0], 'bitrate', None)
+
+            usernames = getattr(s, 'usernames', [])
+            username = usernames[0] if usernames else getattr(s, 'username', 'Unknown')
+
+            player_address = getattr(player, 'address', '') or '' if player else ''
+            player_remote  = getattr(player, 'remotePublicAddress', '') or '' if player else ''
+
+            result.append({
+                'session_id':       str(getattr(s, 'sessionKey', id(s))),
+                'rating_key':       str(getattr(s, 'ratingKey', '')),
+                'plex_item_key':    getattr(s, 'key', ''),
+                'type':             media_type,
+                'title':            getattr(s, 'title', ''),
+                'year':             getattr(s, 'year', None),
+                'show_title':       getattr(s, 'grandparentTitle', None),
+                'season_episode':   season_ep,
+                'thumb_key':        thumb_key,
+                'progress_pct':     progress_pct,
+                'view_offset_ms':   view_offset,
+                'duration_ms':      duration,
+                'state':            getattr(player, 'state', 'unknown') if player else 'unknown',
+                'stream_type':      stream_type,
+                'video_resolution': video_resolution,
+                'bitrate_kbps':     bitrate,
+                'user':             username,
+                'player_device':    getattr(player, 'title', getattr(player, 'device', '')) if player else '',
+                'player_platform':  getattr(player, 'platform', '') if player else '',
+                'player_product':   getattr(player, 'product', '') if player else '',
+                'player_address':   player_address,
+                'player_remote_address': player_remote,
+            })
+        return jsonify({'sessions': result, 'machine_id': machine_id})
+    except Exception as exc:
+        log.error("Error fetching sessions: %s", exc)
+        return jsonify({'error': 'Failed to retrieve sessions.', 'sessions': []}), 500
+
+
+@app.route('/api/thumb')
+@requires_auth
+def api_thumb():
+    """Proxy Plex thumbnails so the token never appears in the browser."""
+    key = request.args.get('key', '').strip()
+    if not key:
+        return '', 404
+    if not (key.startswith('/library/') or key.startswith('/photo/')):
+        return '', 403
+    try:
+        width  = max(1, min(int(request.args.get('w', '80')),  2000))
+        height = max(1, min(int(request.args.get('h', '120')), 2000))
+    except (ValueError, TypeError):
+        return '', 400
+    try:
+        url = (
+            f"{PLEX_URL}/photo/:/transcode"
+            f"?url={urllib.parse.quote(key)}"
+            f"&width={width}&height={height}&minSize=1&upscale=1"
+            f"&X-Plex-Token={PLEX_TOKEN}"
+        )
+        resp = requests.get(url, timeout=10)
+        if resp.ok:
+            ct = resp.headers.get('Content-Type', 'image/jpeg')
+            # Only forward safe image content types; never forward text/html or
+            # other types that the browser would render, which could allow XSS.
+            if not ct.startswith('image/'):
+                ct = 'image/jpeg'
+            return resp.content, 200, {
+                'Content-Type': ct,
+                'Cache-Control': 'public, max-age=3600',
+                'X-Content-Type-Options': 'nosniff',
+            }
+        return '', 404
+    except Exception as exc:
+        log.warning("Thumb proxy error: %s", exc)
+        return '', 404
+
+
+@app.route('/api/geoip')
+@requires_auth
+def api_geoip():
+    """Proxy IP geolocation via ip-api.com with server-side caching."""
+    ip = request.args.get('ip', '').strip()
+    if not ip:
+        return jsonify({'error': 'no ip'}), 400
+    if _is_private_ip(ip):
+        return jsonify({'private': True, 'ip': ip})
+    with _geo_cache_lock:
+        cached = _geo_cache.get(ip)
+        if cached and time.time() - cached.get('_ts', 0) < 86400:
+            out = dict(cached)
+            out.pop('_ts', None)
+            return jsonify(out)
+    try:
+        r = requests.get(
+            f'http://ip-api.com/json/{ip}'
+            '?fields=status,city,country,countryCode,regionName,lat,lon,isp,org,query',
+            timeout=5,
+        )
+        data = r.json()
+        data['_ts'] = time.time()
+        with _geo_cache_lock:
+            _geo_cache[ip] = data
+        out = dict(data)
+        out.pop('_ts', None)
+        return jsonify(out)
+    except Exception as exc:
+        log.warning("GeoIP lookup failed for ip=%r: %s", request.args.get('ip'), exc)
+        return jsonify({'error': 'Geolocation lookup failed.'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Invite management routes (admin)
+# ---------------------------------------------------------------------------
+
+def _invite_validity(invite: dict) -> Optional[str]:
+    """Return an error string if the invite cannot be used, else None."""
+    if not invite:
+        return 'This invite link is not valid.'
+    if invite.get('status') == 'revoked':
+        return 'This invite link has been revoked.'
+    le = invite.get('link_expires_at')
+    if le and int(time.time()) > le:
+        return 'This invite link has expired.'
+    max_uses = invite.get('max_uses', 0)
+    if max_uses > 0 and invite.get('uses', 0) >= max_uses:
+        return 'This invite has reached its maximum number of uses.'
+    return None
+
+
+def _plex_section_names(plex_instance, section_ids: list) -> list[str]:
+    try:
+        all_sections = {str(s.key): s.title for s in plex_instance.library.sections()}
+        if section_ids:
+            return [all_sections.get(str(sid), str(sid)) for sid in section_ids]
+        return list(all_sections.values())
+    except Exception:
+        return []
+
+
+@app.route('/invites', methods=['GET'])
+@requires_auth
+def invites_page():
+    if session.get('demo'):
+        return render_template('invites.html', invites=_DEMO_INVITES,
+                               libraries=[{"id": "1", "title": "TV Shows", "type": "show"},
+                                          {"id": "2", "title": "Movies", "type": "movie"}],
+                               plex_error=None, demo=True)
+
+    plex_instance = get_plex()
+    libraries  = []
+    plex_error = None
+    if plex_instance:
+        try:
+            libraries = [
+                {'id': str(s.key), 'title': s.title, 'type': s.type}
+                for s in plex_instance.library.sections()
+            ]
+        except Exception as exc:
+            plex_error = str(exc)
+
+    invites    = invite_db.list_all()
+    all_grants = invite_db.get_grants()
+    grants_by_invite: dict = {}
+    for g in all_grants:
+        grants_by_invite.setdefault(g['invite_id'], []).append(g)
+
+    now = int(time.time())
+    lib_map = {lib['id']: lib['title'] for lib in libraries}
+    for inv in invites:
+        inv['grants'] = grants_by_invite.get(inv['id'], [])
+        try:
+            inv['section_ids'] = json.loads(inv.get('section_ids', '[]') or '[]')
+        except Exception:
+            inv['section_ids'] = []
+        inv['section_names'] = [lib_map.get(str(sid), str(sid)) for sid in inv['section_ids']]
+        le = inv.get('link_expires_at')
+        inv['link_expired']  = bool(le and now > le)
+        inv['max_reached']   = inv.get('max_uses', 0) > 0 and inv.get('uses', 0) >= inv.get('max_uses', 0)
+        inv['is_active']     = inv.get('status') == 'active' and not inv['link_expired'] and not inv['max_reached']
+
+    return render_template('invites.html', invites=invites, libraries=libraries,
+                           plex_error=plex_error, demo=session.get('demo', False))
+
+
+@app.route('/invites/create', methods=['POST'])
+@requires_auth
+def create_invite():
+    label             = request.form.get('label', '').strip()
+    section_ids       = request.form.getlist('sections')
+    allow_sync        = bool(request.form.get('allow_sync'))
+    allow_channels    = bool(request.form.get('allow_channels'))
+    home_user         = bool(request.form.get('home_user'))
+    duration_days     = int(request.form.get('duration_days', '0') or '0')
+    max_uses          = int(request.form.get('max_uses', '1') or '1')
+    link_expires_days = int(request.form.get('link_expires_days', '7') or '7')
+    invite_db.create(label, section_ids, allow_sync, allow_channels, home_user,
+                     duration_days, max_uses, link_expires_days)
+    return redirect(url_for('invites_page'))
+
+
+@app.route('/invites/revoke/<token>', methods=['POST'])
+@requires_auth
+def revoke_invite(token):
+    invite_db.revoke_invite(token)
+    return redirect(url_for('invites_page'))
+
+
+@app.route('/invites/revoke_grant/<int:grant_id>', methods=['POST'])
+@requires_auth
+def revoke_grant(grant_id):
+    all_grants = invite_db.get_grants()
+    matched = next((g for g in all_grants if g['id'] == grant_id), None)
+    if matched:
+        try:
+            plex_instance = get_plex()
+            if plex_instance:
+                account = plex_instance.myPlexAccount()
+                account.removeFriend(matched['plex_username'])
+                log.info("[INVITE] Manually revoked Plex access for '%s'", matched['plex_username'])
+        except Exception as exc:
+            log.warning("[INVITE] Error revoking Plex friend '%s': %s", matched.get('plex_username'), exc)
+        invite_db.revoke_grant(grant_id)
+    return redirect(url_for('invites_page'))
+
+
+# ---------------------------------------------------------------------------
+# Public invite / onboarding routes
+# ---------------------------------------------------------------------------
+
+@app.route('/invite/<token>', methods=['GET'])
+def invite_onboard(token):
+    invite = invite_db.get(token)
+    err = _invite_validity(invite)
+    if err:
+        return render_template('invite_onboard.html', error=err, step='error',
+                               invite=invite, section_names=[], token=token,
+                               plex_server_name='', plex_username='',
+                               plex_url=PLEX_URL,
+                               onboard_wiki_url=ONBOARD_WIKI_URL,
+                               onboard_request_url=ONBOARD_REQUEST_URL)
+
+    plex_instance   = get_plex()
+    plex_server_name = getattr(plex_instance, 'friendlyName', '') if plex_instance else ''
+    section_ids     = json.loads(invite.get('section_ids', '[]') or '[]')
+    section_names   = _plex_section_names(plex_instance, section_ids) if plex_instance else []
+
+    step = request.args.get('step', 'welcome')
+    return render_template(
+        'invite_onboard.html',
+        invite=invite, section_names=section_names, step=step,
+        token=token, error=None,
+        plex_server_name=plex_server_name, plex_username='',
+        plex_url=PLEX_URL,
+        onboard_wiki_url=ONBOARD_WIKI_URL,
+        onboard_request_url=ONBOARD_REQUEST_URL,
+    )
+
+
+@app.route('/invite/<token>/accept', methods=['POST'])
+@csrf.exempt
+def accept_invite(token):
+    invite = invite_db.get(token)
+    err = _invite_validity(invite)
+    if err:
+        return render_template('invite_onboard.html', error=err, step='error',
+                               invite=invite, section_names=[], token=token,
+                               plex_server_name='', plex_username='',
+                               plex_url=PLEX_URL,
+                               onboard_wiki_url=ONBOARD_WIKI_URL,
+                               onboard_request_url=ONBOARD_REQUEST_URL)
+
+    plex_username    = request.form.get('plex_username', '').strip()
+    plex_instance    = get_plex()
+    plex_server_name = getattr(plex_instance, 'friendlyName', '') if plex_instance else ''
+
+    if not plex_username:
+        return render_template('invite_onboard.html', invite=invite, step='accept',
+                               error='Please enter your Plex username or email.',
+                               token=token, section_names=[], plex_server_name=plex_server_name,
+                               plex_username='',
+                               plex_url=PLEX_URL,
+                               onboard_wiki_url=ONBOARD_WIKI_URL,
+                               onboard_request_url=ONBOARD_REQUEST_URL)
+
+    if not plex_instance:
+        return render_template('invite_onboard.html', invite=invite, step='accept',
+                               error='Server error: cannot connect to Plex. Please try again later.',
+                               token=token, section_names=[], plex_server_name=plex_server_name,
+                               plex_username=plex_username,
+                               plex_url=PLEX_URL,
+                               onboard_wiki_url=ONBOARD_WIKI_URL,
+                               onboard_request_url=ONBOARD_REQUEST_URL)
+    try:
+        account       = plex_instance.myPlexAccount()
+        section_ids   = json.loads(invite.get('section_ids', '[]') or '[]')
+        all_lib       = plex_instance.library.sections()
+        sections      = [s for s in all_lib if str(s.key) in [str(sid) for sid in section_ids]] \
+                        if section_ids else None
+        section_names = _plex_section_names(plex_instance, section_ids)
+
+        account.inviteFriend(
+            user=plex_username,
+            server=plex_instance,
+            sections=sections,
+            allowSync=bool(invite.get('allow_sync')),
+            allowCameraUpload=False,
+            allowChannels=bool(invite.get('allow_channels')),
+        )
+        invite_db.record_acceptance(invite['id'], plex_username, invite.get('duration_days', 0))
+        log.info("[INVITE] '%s' accepted invite '%s'", plex_username, invite.get('label', token))
+
+        return render_template(
+            'invite_onboard.html',
+            step='done', invite=invite, section_names=section_names,
+            token=token, error=None,
+            plex_server_name=plex_server_name, plex_username=plex_username,
+            plex_url=PLEX_URL,
+            onboard_wiki_url=ONBOARD_WIKI_URL,
+            onboard_request_url=ONBOARD_REQUEST_URL,
+        )
+    except Exception as exc:
+        err = str(exc)
+        log.error("[INVITE] Acceptance error for '%s': %s", plex_username, exc)
+        if 'already' in err.lower() or 'exist' in err.lower():
+            user_err = f"'{plex_username}' may already have access, or has already been invited."
+        elif 'not found' in err.lower() or 'invalid' in err.lower() or '404' in err:
+            user_err = f"Plex account '{plex_username}' not found. Please check your username or email."
+        else:
+            user_err = "Could not process the invite. Please try again or contact the server owner."
+        return render_template(
+            'invite_onboard.html',
+            invite=invite, step='accept', error=user_err,
+            token=token, section_names=[], plex_server_name=plex_server_name,
+            plex_username=plex_username,
+            plex_url=PLEX_URL,
+            onboard_wiki_url=ONBOARD_WIKI_URL,
+            onboard_request_url=ONBOARD_REQUEST_URL,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
 
@@ -1298,6 +2118,9 @@ if __name__ == '__main__':
 
     cf_thread = threading.Thread(target=custom_format_refresh_scheduler, daemon=True, name="cf-scheduler")
     cf_thread.start()
+
+    invite_thread = threading.Thread(target=invite_expiry_scheduler, daemon=True, name="invite-expiry")
+    invite_thread.start()
 
     log.info("Webhook receiver active on port %d", PORT)
     serve(app, host='0.0.0.0', port=PORT)
