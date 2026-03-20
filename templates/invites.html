@@ -418,7 +418,7 @@
               {% endif %}
               <div class="grant-actions">
                 {% if not g.revoked %}
-                <form method="post" action="/invites/revoke_grant/{{ g.id }}" style="display:inline;" onsubmit="return confirm('Revoke Plex access for {{ g.plex_username }}?')"> {# nosemgrep: django-no-csrf-token #}
+                <form method="post" action="/invites/revoke_grant/{{ g.id }}" style="display:inline;" data-confirm="Revoke Plex access for {{ g.plex_username }}?" onsubmit="return confirm(this.dataset.confirm)"> {# nosemgrep: django-no-csrf-token #}
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button type="submit" class="btn-revoke">Revoke</button>
                 </form>

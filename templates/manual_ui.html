@@ -976,18 +976,23 @@ function jumpPage(form, maxPage) {
       var sClass    = stateClass(s.state);
       var sLabel    = stateLabel(s.state);
       var ip        = s.player_address || s.player_remote_address || '';
-      var mapId     = 'np-map-' + s.session_id;
+      // Sanitize session_id to alphanumeric so it is safe in HTML id/attribute contexts
+      var safeId = String(s.session_id).replace(/[^a-zA-Z0-9_-]/g, '');
+      var mapId  = 'np-map-' + safeId;
 
       var plexUrl = '';
       if (machineId && s.rating_key) {
         plexUrl = 'https://app.plex.tv/desktop/#!/server/' + machineId
                 + '/details?key=' + encodeURIComponent(s.plex_item_key || '/library/metadata/' + s.rating_key);
       }
+      var safePlexUrl = escHtml(plexUrl); // escape for use inside HTML attribute values
 
       var posterHtml = s.thumb_key
-        ? '<a href="' + (plexUrl || '#') + '" target="_blank" rel="noopener">'
-          + '<img class="np-poster" src="/api/thumb?key=' + encodeURIComponent(s.thumb_key) + '&w=72&h=108" alt="poster" loading="lazy"></a>'
+        ? '<a href="' + (safePlexUrl || '#') + '" target="_blank" rel="noopener">'
+          + '<img class="np-poster" src="' + escHtml('/api/thumb?key=' + encodeURIComponent(s.thumb_key) + '&w=72&h=108') + '" alt="poster" loading="lazy"></a>'
         : '<div class="np-poster-ph">?</div>';
+
+      var safeYear  = parseInt(s.year, 10) || 0;
 
       var titleHtml = '';
       if (s.type === 'episode') {
@@ -996,7 +1001,7 @@ function jumpPage(form, maxPage) {
               + (s.title ? ' · ' + escHtml(s.title) : '') + '</div>' : '');
       } else {
         titleHtml = '<div class="np-title">' + escHtml(s.title)
-          + (s.year ? ' <span class="np-year">(' + s.year + ')</span>' : '') + '</div>';
+          + (safeYear ? ' <span class="np-year">(' + safeYear + ')</span>' : '') + '</div>';
       }
 
       var qualParts = [s.stream_type, s.video_resolution ? s.video_resolution.toUpperCase() : '',
@@ -1004,7 +1009,7 @@ function jumpPage(form, maxPage) {
 
       var playerParts = [s.player_device, s.player_platform].filter(Boolean);
 
-      html += '<div class="np-session" data-sid="' + s.session_id + '">'
+      html += '<div class="np-session" data-sid="' + safeId + '">'
         + '<div class="np-poster-wrap">' + posterHtml + '</div>'
         + '<div class="np-info">'
         +   '<div class="np-title-row">'
@@ -1014,7 +1019,7 @@ function jumpPage(form, maxPage) {
         +   '<div class="np-user">'
         +     '<span class="np-username">' + escHtml(s.user) + '</span>'
         +     (playerParts.length ? '<span class="np-sep">·</span><span>' + escHtml(playerParts.join(' · ')) + '</span>' : '')
-        +     (plexUrl ? '<a href="' + plexUrl + '" target="_blank" rel="noopener" class="np-plex-link" title="Open in Plex">↗ Plex</a>' : '')
+        +     (safePlexUrl ? '<a href="' + safePlexUrl + '" target="_blank" rel="noopener" class="np-plex-link" title="Open in Plex">↗ Plex</a>' : '')
         +   '</div>'
         +   '<div class="np-progress-row">'
         +     '<div class="np-progress-bar"><div class="np-progress-fill" style="width:' + pct + '%"></div></div>'
@@ -1024,7 +1029,7 @@ function jumpPage(form, maxPage) {
         +   (qualParts.length ? '<div class="np-quality">' + escHtml(qualParts.join(' · ')) + '</div>' : '')
         +   '<div class="np-ip-row">'
         +     (ip ? '<span class="np-ip">' + escHtml(ip) + '</span>' : '')
-        +     '<span class="np-geo-text" id="geo-text-' + s.session_id + '"></span>'
+        +     '<span class="np-geo-text" id="geo-text-' + safeId + '"></span>'
         +   '</div>'
         + '</div>'
         + '<div class="np-map-col"><div id="' + mapId + '"></div></div>'
@@ -1035,8 +1040,9 @@ function jumpPage(form, maxPage) {
 
     // Geo lookup + map init for each session
     sessions.forEach(function(s) {
-      var ip = s.player_address || s.player_remote_address || '';
-      if (ip) initGeo(s.session_id, ip);
+      var ip     = s.player_address || s.player_remote_address || '';
+      var safeId = String(s.session_id).replace(/[^a-zA-Z0-9_-]/g, '');
+      if (ip) initGeo(safeId, ip);
     });
   }
 
