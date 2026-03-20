@@ -1567,6 +1567,7 @@ def api_thumb():
             return resp.content, 200, {
                 'Content-Type': ct,
                 'Cache-Control': 'public, max-age=3600',
+                'X-Content-Type-Options': 'nosniff',
             }
         return '', 404
     except Exception as exc:
