@@ -31,6 +31,8 @@ Copy `.env.example` to `.env` and fill in values before running.
 | `WEBHOOK_DELAY` | no | `30s` | Wait before scanning (e.g. `30s`, `5m`) |
 | `USE_RCLONE` | no | `false` | Enable rclone VFS cache clearing |
 | `TZ` | no | `UTC` | IANA timezone name |
+| `ONBOARD_WIKI_URL` | no | — | Link to setup/wiki shown on invite onboard page |
+| `ONBOARD_REQUEST_URL` | no | — | Link to content request site shown on invite onboard page |
 
 Full reference in README.md.
 
@@ -82,6 +84,31 @@ _SKIP = {'Grab', 'EpisodeFileDelete', 'EpisodeFileDeleted', 'SeriesDelete',
 pip install -r requirements.txt
 # flask, flask-wtf, python-dotenv, requests, PlexAPI
 ```
+
+## Git Workflow
+
+Before making any changes, always:
+
+1. Check if the current working branch (if one exists from a previous session) has any open PRs
+   - If it has open PRs, continue making changes on that branch (do not delete it)
+   - If it has no open PRs, delete it and create a fresh branch based off `master`
+2. Create a fresh branch based off `master` (only if the old branch was deleted)
+3. Then make your changes on the new branch
+
+```bash
+git checkout master
+git pull origin master
+
+# Check for open PRs before deleting the old branch
+gh pr list --head <old-branch> --state open
+# If no open PRs:
+git branch -D <old-branch>   # delete old branch
+git checkout -b claude/<feature-name>
+# If open PRs exist:
+git checkout <old-branch>    # continue working on the existing branch
+```
+
+This ensures changes are always based on the latest master and avoids stale branch state, while preserving branches that have open PRs under review.
 
 ## No Tests
 
