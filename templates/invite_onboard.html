@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% if step == 'done' %}Welcome!{% elif step == 'error' %}Invalid Invite{% else %}You're Invited!{% endif %} · Plex</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><rect width='24' height='24' rx='4' fill='%230d0d0f'/><path stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' d='M20 12a8 8 0 1 1-1.6-4.8'/><polyline stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='20,4 20,8 16,8'/></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0d0d0f; --surface: #161618; --border: #2a2a2e;
+    --accent: #e5a00d; --accent-dim: rgba(229,160,13,0.12);
+    --text: #e8e8e8; --muted: #666;
+    --success: #4ade80; --warn: #fb923c; --error: #f87171; --info: #60a5fa;
+    --plex: #e5a00d;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 15px;
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    padding: 48px 20px 80px;
+  }
+
+  .logo-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 36px;
+  }
+  .logo-icon { filter: drop-shadow(0 0 8px rgba(229,160,13,0.6)); }
+  .logo-name {
+    font-family: 'IBM Plex Mono', monospace; font-size: 15px;
+    font-weight: 600; letter-spacing: 0.04em; color: var(--accent);
+  }
+
+  .card {
+    width: 100%; max-width: 480px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 32px;
+    margin-bottom: 16px;
+  }
+
+  .card-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 24px;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: #0d0d0f;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-num.done {
+    background: var(--success); content: '✓';
+  }
+  h2 {
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 18px;
+    font-weight: 600; color: var(--text);
+  }
+  .subtitle {
+    font-size: 13px; color: var(--muted); margin-top: 3px;
+  }
+
+  .invite-summary {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; margin-bottom: 20px;
+  }
+  .summary-title {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .summary-row {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 13px; margin-bottom: 8px;
+  }
+  .summary-row:last-child { margin-bottom: 0; }
+  .summary-check { color: var(--success); font-size: 14px; flex-shrink: 0; }
+  .summary-cross { color: var(--muted);   font-size: 14px; flex-shrink: 0; }
+  .summary-key   { color: var(--muted);   font-size: 12px; min-width: 90px; }
+  .summary-val   { color: var(--text);    font-size: 13px; }
+
+  .lib-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .lib-pill {
+    background: rgba(96,165,250,0.1); color: var(--info);
+    border: 1px solid rgba(96,165,250,0.25); border-radius: 3px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    padding: 2px 8px;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 11px 20px; border-radius: var(--radius);
+    text-decoration: none; cursor: pointer; transition: opacity 0.15s;
+    border: none; white-space: nowrap;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary { background: var(--accent); color: #0d0d0f; }
+  .btn-plex    { background: #e5a00d; color: #0d0d0f; }
+  .btn-outline {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-outline:hover { color: var(--text); border-color: var(--text); opacity: 1; }
+  .btn-success { background: var(--success); color: #0d0d0f; }
+
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; align-items: center; }
+
+  .divider {
+    display: flex; align-items: center; gap: 10px;
+    margin: 18px 0;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted);
+  }
+  .divider::before, .divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .field input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text);
+    font-family: 'IBM Plex Mono', monospace; font-size: 14px;
+    padding: 11px 14px; outline: none; transition: border-color 0.15s;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .field input::placeholder { color: var(--muted); }
+
+  .error-card {
+    width: 100%; max-width: 480px;
+    background: rgba(248,113,113,0.07); border: 1px solid var(--error);
+    border-radius: var(--radius); padding: 24px; text-align: center;
+    margin-bottom: 16px;
+  }
+  .error-icon { font-size: 32px; margin-bottom: 12px; }
+  .error-title { font-size: 17px; font-weight: 600; color: var(--error); margin-bottom: 8px; }
+  .error-msg   { font-size: 13px; color: var(--muted); }
+
+  .inline-error {
+    background: rgba(248,113,113,0.07); border: 1px solid var(--error);
+    border-left: 3px solid var(--error); border-radius: var(--radius);
+    color: var(--error); font-size: 12px; padding: 10px 14px;
+    margin-bottom: 14px; font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* Done page — guide cards */
+  .guide-card {
+    width: 100%; max-width: 480px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
+    margin-bottom: 12px;
+  }
+  .guide-step-num {
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .guide-title   { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .guide-desc    { font-size: 13px; color: var(--muted); margin-bottom: 16px; line-height: 1.6; }
+
+  .welcome-banner {
+    width: 100%; max-width: 480px;
+    background: linear-gradient(135deg, rgba(229,160,13,0.12), rgba(74,222,128,0.08));
+    border: 1px solid rgba(229,160,13,0.3); border-radius: var(--radius);
+    padding: 28px 32px; margin-bottom: 20px; text-align: center;
+  }
+  .welcome-icon  { font-size: 42px; margin-bottom: 10px; }
+  .welcome-title { font-size: 24px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .welcome-user  { color: var(--accent); }
+  .welcome-sub   { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="logo-row">
+  <svg class="logo-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" width="32" height="32">
+    <rect width="24" height="24" rx="4" fill="#0d0d0f"/>
+    <path stroke="#e5a00d" stroke-width="2" stroke-linecap="round" d="M20 12a8 8 0 1 1-1.6-4.8"/>
+    <polyline stroke="#e5a00d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="20,4 20,8 16,8"/>
+  </svg>
+  <span class="logo-name">{{ plex_server_name or 'PLEX SERVER' }}</span>
+</div>
+
+{% if step == 'error' %}
+<!-- ===================== ERROR STATE ===================== -->
+<div class="error-card">
+  <div class="error-icon">⛔</div>
+  <div class="error-title">Invite Unavailable</div>
+  <div class="error-msg">{{ error }}</div>
+</div>
+
+{% elif step == 'welcome' %}
+<!-- ===================== STEP 1: WELCOME ===================== -->
+<div class="card">
+  <div class="card-header">
+    <div class="step-num">1</div>
+    <div>
+      <h2>You're Invited!</h2>
+      <div class="subtitle">{% if plex_server_name %}Join {{ plex_server_name }} on Plex{% else %}Join this Plex server{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="invite-summary">
+    <div class="summary-title">What you'll get</div>
+
+    {% if section_names %}
+    <div class="summary-row">
+      <span class="summary-check">✓</span>
+      <span class="summary-key">Libraries</span>
+      <div>
+        <div class="lib-pills">
+          {% for lib in section_names %}
+          <span class="lib-pill">{{ lib }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="summary-row">
+      <span class="summary-check">✓</span>
+      <span class="summary-key">Libraries</span>
+      <span class="summary-val">All libraries</span>
+    </div>
+    {% endif %}
+
+    <div class="summary-row">
+      {% if invite.allow_sync %}
+        <span class="summary-check">✓</span>
+        <span class="summary-key">Downloads</span>
+        <span class="summary-val">Allowed (offline viewing)</span>
+      {% else %}
+        <span class="summary-cross">✗</span>
+        <span class="summary-key">Downloads</span>
+        <span class="summary-val" style="color:var(--muted)">Not included</span>
+      {% endif %}
+    </div>
+
+    <div class="summary-row">
+      {% if invite.allow_channels %}
+        <span class="summary-check">✓</span>
+        <span class="summary-key">Live TV</span>
+        <span class="summary-val">Included</span>
+      {% else %}
+        <span class="summary-cross">✗</span>
+        <span class="summary-key">Live TV</span>
+        <span class="summary-val" style="color:var(--muted)">Not included</span>
+      {% endif %}
+    </div>
+
+    <div class="summary-row">
+      {% if invite.duration_days %}
+        <span class="summary-check">⏱</span>
+        <span class="summary-key">Duration</span>
+        <span class="summary-val">{{ invite.duration_days }} days from joining</span>
+      {% else %}
+        <span class="summary-check">∞</span>
+        <span class="summary-key">Duration</span>
+        <span class="summary-val">Permanent access</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <p style="font-size:14px;line-height:1.65;color:var(--muted);margin-bottom:6px;">
+    To accept this invite you need a free <strong style="color:var(--text)">Plex account</strong>.
+    If you don't have one yet, create one first — it only takes a minute.
+  </p>
+
+  <div class="btn-row">
+    <a href="https://www.plex.tv/sign-up/" target="_blank" rel="noopener" class="btn btn-outline">
+      Create Plex Account ↗
+    </a>
+    <a href="/invite/{{ token }}?step=accept" class="btn btn-primary">
+      I have a Plex account →
+    </a>
+  </div>
+</div>
+
+{% elif step == 'accept' %}
+<!-- ===================== STEP 2: ACCEPT ===================== -->
+<div class="card">
+  <div class="card-header">
+    <div class="step-num">2</div>
+    <div>
+      <h2>Accept Your Invite</h2>
+      <div class="subtitle">Enter your Plex username or email address</div>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="inline-error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/invite/{{ token }}/accept">
+    <div class="field">
+      <label for="plex_username">Plex Username or Email</label>
+      <input type="text" id="plex_username" name="plex_username"
+             value="{{ plex_username or '' }}"
+             placeholder="your-username or you@example.com"
+             autocomplete="username" autofocus spellcheck="false">
+    </div>
+    <div class="btn-row">
+      <a href="/invite/{{ token }}" class="btn btn-outline">← Back</a>
+      <button type="submit" class="btn btn-primary">Accept Invite →</button>
+    </div>
+  </form>
+
+  <div class="divider">don't have an account?</div>
+  <a href="https://www.plex.tv/sign-up/" target="_blank" rel="noopener"
+     style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);text-decoration:none;">
+    Create a free Plex account ↗
+  </a>
+</div>
+
+{% elif step == 'done' %}
+<!-- ===================== STEP 3+4: DONE / OFF-BOARDING ===================== -->
+<div class="welcome-banner">
+  <div class="welcome-icon">🎉</div>
+  <div class="welcome-title">Welcome, <span class="welcome-user">{{ plex_username }}</span>!</div>
+  <div class="welcome-sub">You now have access to {% if plex_server_name %}{{ plex_server_name }}{% else %}the server{% endif %}</div>
+</div>
+
+{% if section_names %}
+<div class="card" style="max-width:480px;">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Your Libraries</div>
+  <div class="lib-pills">
+    {% for lib in section_names %}
+    <span class="lib-pill">{{ lib }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Step 3: Set up Plex client -->
+<div class="guide-card">
+  <div class="guide-step-num">Step 3 · Set Up Your Plex Client</div>
+  <div class="guide-title">Configure Plex on Your Devices</div>
+  <div class="guide-desc">
+    We've written setup guides to help you install and configure the Plex app on
+    your TV, phone, computer, and more. Follow the guides for the best experience.
+  </div>
+  <a href="https://bookstack.servernation.xyz" target="_blank" rel="noopener" class="btn btn-primary">
+    View Setup Guides ↗
+  </a>
+</div>
+
+<!-- Step 4: Request content -->
+<div class="guide-card">
+  <div class="guide-step-num">Step 4 · Request Movies &amp; TV Shows</div>
+  <div class="guide-title">Can't Find Something? Request It!</div>
+  <div class="guide-desc">
+    Use the request site to search for any movie or TV show you'd like added to the library.
+    Requests are reviewed and added regularly.
+  </div>
+  <a href="https://request.servernation.xyz" target="_blank" rel="noopener" class="btn btn-success">
+    Go to Request Site ↗
+  </a>
+</div>
+
+<!-- Open Plex -->
+<div class="guide-card">
+  <div class="guide-step-num">Ready to Watch?</div>
+  <div class="guide-title">Start Streaming</div>
+  <div class="guide-desc">
+    Open Plex Web or download the app on your device and sign in with the account you
+    just used to accept this invite.
+  </div>
+  <div class="btn-row" style="margin-top:0;">
+    <a href="https://app.plex.tv" target="_blank" rel="noopener" class="btn btn-plex">
+      Open Plex Web ↗
+    </a>
+    <a href="https://www.plex.tv/media-server-downloads/#plex-app" target="_blank" rel="noopener" class="btn btn-outline">
+      Download Plex App ↗
+    </a>
+  </div>
+</div>
+
+{% endif %}
+</body>
+</html>
