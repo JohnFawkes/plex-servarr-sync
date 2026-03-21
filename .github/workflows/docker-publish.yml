@@ -120,7 +120,10 @@ jobs:
             -e SECRET_KEY=ci-test-secret-key \
             -e PLEX_URL=http://localhost:32400 \
             -e PLEX_TOKEN=ci-test-token \
-            -e SECTION_MAPPING='{}' \
+            -e SECTION_MAPPING='{"/" : "1"}' \
+            -e DEMO_MODE=true \
+            -e ONBOARD_WIKI_URL=https://example.com/wiki \
+            -e ONBOARD_REQUEST_URL=https://example.com/requests \
             --name test-container "$TEST_TAG"
 
       - name: Wait for container to start (with retry)
@@ -154,6 +157,71 @@ jobs:
             docker logs test-container
             exit 1
           fi
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Take demo screenshots
+        run: |
+          python3 - <<'EOF'
+          import asyncio
+          from playwright.async_api import async_playwright
+
+          BASE = "http://localhost:5000"
+
+          async def main():
+              async with async_playwright() as p:
+                  browser = await p.chromium.launch()
+                  ctx = await browser.new_context(viewport={"width": 1280, "height": 900})
+                  page = await ctx.new_page()
+
+                  await page.goto(f"{BASE}/login")
+                  await page.wait_for_load_state("networkidle")
+                  await page.screenshot(path="screenshot-login.png", full_page=True)
+                  print("Saved screenshot-login.png")
+
+                  await page.goto(f"{BASE}/login/demo")
+                  await page.wait_for_load_state("networkidle")
+
+                  await page.goto(f"{BASE}/")
+                  await page.wait_for_load_state("networkidle")
+                  await page.wait_for_timeout(1500)
+                  await page.screenshot(path="screenshot-webui.png", full_page=True)
+                  print("Saved screenshot-webui.png")
+
+                  await page.goto(f"{BASE}/invites")
+                  await page.wait_for_load_state("networkidle")
+                  await page.screenshot(path="screenshot-invites.png", full_page=True)
+                  print("Saved screenshot-invites.png")
+
+                  await browser.close()
+
+          asyncio.run(main())
+          EOF
+
+      - name: Commit screenshots to repo
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p screenshots
+          cp screenshot-login.png   screenshots/login.png
+          cp screenshot-webui.png   screenshots/webui.png
+          cp screenshot-invites.png screenshots/invites.png
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add screenshots/
+          git diff --staged --quiet && echo "No changes to screenshots." || \
+            git commit -m "chore: update demo screenshots [skip ci]" && \
+            git push origin HEAD:${{ github.ref_name }}
+
+      - name: Upload screenshots as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-screenshots-${{ github.sha }}
+          path: screenshots/
+          retention-days: 30
 
       - name: Stop Test Container
         if: always()
