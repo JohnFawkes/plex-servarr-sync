@@ -160,11 +160,13 @@ jobs:
           fi
 
       - name: Install Playwright
+        if: false
         run: |
           pip install playwright
           playwright install --with-deps chromium
 
       - name: Take demo screenshots
+        if: false
         run: |
           python3 - <<'EOF'
           import asyncio
@@ -203,6 +205,7 @@ jobs:
           EOF
 
       - name: Commit screenshots to repo
+        if: false
         run: |
           mkdir -p screenshots
           cp screenshot-login.png   screenshots/login.png
@@ -217,7 +220,7 @@ jobs:
 
       - name: Upload screenshots as artifact
         uses: actions/upload-artifact@v7
-        if: always()
+        if: false
         with:
           name: demo-screenshots-${{ github.sha }}
           path: screenshots/
