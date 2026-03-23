@@ -1795,6 +1795,9 @@ def api_thumb():
         return '', 404
     if not (key.startswith('/library/') or key.startswith('/photo/')):
         return '', 403
+    # Restrict to safe path characters only — prevents injection via crafted keys.
+    if not re.fullmatch(r'[/\w.\-]+', key):
+        return '', 403
     try:
         width  = max(1, min(int(request.args.get('w', '80')),  2000))
         height = max(1, min(int(request.args.get('h', '120')), 2000))
