@@ -13,6 +13,7 @@ Logic:
 """
 
 import os
+import io
 import time
 import json
 import re
@@ -35,7 +36,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import plexapi
 from waitress import serve
-from flask import Flask, request, jsonify, render_template, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, send_file
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 from plexapi.server import PlexServer
@@ -1830,11 +1831,15 @@ def api_thumb():
             )
             if not any(body.startswith(magic) for magic in _IMAGE_MAGIC):
                 return '', 502
-            return body, 200, {
-                'Content-Type': ct,
-                'Cache-Control': 'public, max-age=3600',
-                'X-Content-Type-Options': 'nosniff',
-            }
+            # Use send_file with a BytesIO stream — the idiomatic Flask binary
+            # data sink.  This avoids returning raw bytes directly in the
+            # response tuple (which CodeQL treats as an HTML sink) and lets
+            # Flask set Content-Type / Cache-Control safely.
+            buf = io.BytesIO(body)
+            response = send_file(buf, mimetype=ct)
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            return response
         return '', 404
     except Exception as exc:
         log.warning("Thumb proxy error: %s", exc)
