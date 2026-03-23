@@ -1813,11 +1813,16 @@ def api_thumb():
         )
         resp = requests.get(url, timeout=10)
         if resp.ok:
-            ct = resp.headers.get('Content-Type', 'image/jpeg')
-            # Only forward safe image content types; never forward text/html or
-            # other types that the browser would render, which could allow XSS.
-            if not ct.startswith('image/'):
-                ct = 'image/jpeg'
+            # Map the response Content-Type to a known-safe literal from a
+            # whitelist.  This breaks any taint originating from the user-
+            # supplied 'key' parameter flowing into send_file's mimetype arg,
+            # since the value assigned to ct is always one of our own strings.
+            _SAFE_CT = {
+                'image/jpeg', 'image/png', 'image/gif',
+                'image/webp', 'image/bmp', 'image/tiff',
+            }
+            raw_ct = resp.headers.get('Content-Type', '').split(';')[0].strip()
+            ct = raw_ct if raw_ct in _SAFE_CT else 'image/jpeg'
             body = resp.content
             # Validate response starts with a known image magic-byte signature.
             # This breaks the taint chain — if Plex returns anything other than
