@@ -459,6 +459,7 @@
           if (parts.length) geoDetail.textContent = parts.join(' · ');
         }
         if (mapEl && typeof L !== 'undefined') {
+          mapEl.style.height = '200px';
           var map = L.map(mapId, {
             center: [geo.lat, geo.lon], zoom: 7,
             zoomControl: false, attributionControl: false,
@@ -470,6 +471,7 @@
             radius: 7, color: '#e5a00d', fillColor: '#e5a00d', fillOpacity: 0.9, weight: 2
           }).bindTooltip(location, {permanent: false, direction: 'top'}).addTo(map);
           activeMaps[sessionId] = map;
+          setTimeout(function() { map.invalidateSize(); }, 50);
         }
       }
     } catch(e) { /* geo not critical */ }
