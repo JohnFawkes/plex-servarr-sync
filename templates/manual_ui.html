@@ -626,6 +626,7 @@
       <h1>MEDIA SERVARR SYNC</h1>
       <nav class="header-nav">
         <a href="/" class="nav-link active">Sync</a>
+        <a href="/now-playing" class="nav-link">Now Playing</a>
         <a href="/invites" class="nav-link">Invites</a>
       </nav>
     </div>
@@ -643,13 +644,24 @@
       Now Playing
       <span id="stream-count" style="color:var(--muted);font-size:9px;"></span>
       <span style="margin-left:auto;display:flex;align-items:center;gap:8px;">
-        <span id="np-countdown" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:0.05em;">10s</span>
+        <a href="/now-playing" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--accent);text-decoration:none;padding:2px 8px;border:1px solid var(--accent);border-radius:var(--radius);">Open ↗</a>
         <button type="button" id="np-refresh-btn" class="refresh-btn" title="Refresh now">↻</button>
       </span>
     </div>
     <div id="now-playing-body">
       <div class="np-empty">Loading…</div>
     </div>
+  </div>
+
+  <div class="card" id="library-scan-card">
+    <div class="card-label">Full Library Scan</div>
+    <div class="input-row">
+      <select id="library-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:13px;padding:10px 14px;outline:none;">
+        <option value="">Loading libraries…</option>
+      </select>
+      <button type="button" id="library-scan-btn" onclick="triggerLibraryScan()">SCAN</button>
+    </div>
+    <div id="library-scan-msg" style="display:none;" class="msg"></div>
   </div>
 
   <div class="card">
@@ -913,6 +925,57 @@ function jumpPage(form, maxPage) {
   if (val > maxPage) val = maxPage;
   form.page.value = val;
   return true;
+}
+
+/* ---------- library scan ---------- */
+(function loadLibraries() {
+  fetch('/api/libraries').then(function(r){ return r.json(); }).then(function(data) {
+    var sel = document.getElementById('library-select');
+    if (!sel) return;
+    var libs = data.libraries || [];
+    if (!libs.length) { sel.innerHTML = '<option value="">No libraries found</option>'; return; }
+    sel.innerHTML = libs.map(function(l) {
+      return '<option value="' + escHtml(String(l.id)) + '">' + escHtml(l.title) + '</option>';
+    }).join('');
+  }).catch(function() {
+    var sel = document.getElementById('library-select');
+    if (sel) sel.innerHTML = '<option value="">Failed to load libraries</option>';
+  });
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+
+function triggerLibraryScan() {
+  var sel    = document.getElementById('library-select');
+  var btn    = document.getElementById('library-scan-btn');
+  var msgEl  = document.getElementById('library-scan-msg');
+  if (!sel || !sel.value) return;
+  btn.disabled = true;
+  btn.textContent = 'SCANNING…';
+  if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
+  fetch('/api/scan/library', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({section_id: sel.value})
+  }).then(function(r){ return r.json().then(function(d){ return {ok: r.ok, data: d}; }); })
+  .then(function(res) {
+    if (msgEl) {
+      if (res.ok) {
+        msgEl.className = 'msg success';
+        msgEl.textContent = '✓ Full scan queued for: ' + (res.data.library || sel.options[sel.selectedIndex].text);
+      } else {
+        msgEl.className = 'msg error';
+        msgEl.textContent = '✗ ' + (res.data.error || 'Unknown error');
+      }
+      msgEl.style.display = '';
+    }
+  }).catch(function() {
+    if (msgEl) { msgEl.className = 'msg error'; msgEl.textContent = '✗ Request failed'; msgEl.style.display = ''; }
+  }).finally(function() {
+    btn.disabled = false;
+    btn.textContent = 'SCAN';
+  });
 }
 </script>
 

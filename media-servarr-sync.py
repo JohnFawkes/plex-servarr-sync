@@ -1614,7 +1614,9 @@ def now_playing():
                         "show": getattr(s, 'grandparentTitle', None) if media_type == 'episode' else None,
                         "episode": season_ep, "type": media_type,
                         "player": getattr(player, 'title', '') if player else '',
-                        "state": getattr(player, 'state', 'playing') if player else 'playing',
+                        "state": (getattr(player, 'state', None)
+                                  or (player._data.attrib.get('state') if player and hasattr(player, '_data') else None)
+                                  or 'playing'),
                         "progress_pct": progress_pct,
                         "duration_str": _ms(duration) if duration else '--',
                         "position_str": _ms(view_offset),
@@ -1787,7 +1789,9 @@ def api_sessions():
                 'progress_pct':     progress_pct,
                 'view_offset_ms':   view_offset,
                 'duration_ms':      duration,
-                'state':            getattr(player, 'state', 'unknown') if player else 'unknown',
+                'state':            (getattr(player, 'state', None)
+                                    or (player._data.attrib.get('state') if player and hasattr(player, '_data') else None)
+                                    or 'unknown'),
                 'stream_type':      stream_type,
                 'video_resolution': video_resolution,
                 'bitrate_kbps':     bitrate,
@@ -1866,6 +1870,48 @@ def api_thumb():
     except Exception as exc:
         log.warning("Thumb proxy error: %s", exc)
         return '', 404
+
+
+@app.route('/api/scan/library', methods=['POST'])
+@csrf.exempt
+@requires_auth
+def api_scan_library():
+    """Trigger a full Plex library scan on a specific section."""
+    data = request.get_json(silent=True) or {}
+    section_id = str(data.get('section_id', '')).strip()
+    if not section_id:
+        return jsonify({'error': 'section_id required'}), 400
+    plex_instance = get_plex()
+    if not plex_instance:
+        return jsonify({'error': 'Plex not connected'}), 503
+    try:
+        library = plex_instance.library.sectionByID(int(section_id))
+        library.update()
+        log.info("[MANUAL] Full scan triggered for library '%s' (section %s)", library.title, section_id)
+        return jsonify({'status': 'ok', 'library': library.title})
+    except Exception as exc:
+        log.error("[MANUAL] Full scan error for section %s: %s", section_id, exc)
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/libraries')
+@requires_auth
+def api_libraries():
+    """Return the list of Plex library sections."""
+    if session.get('demo'):
+        return jsonify({'libraries': [
+            {'id': '1', 'title': 'TV Shows', 'type': 'show'},
+            {'id': '2', 'title': 'Movies', 'type': 'movie'},
+        ]})
+    plex_instance = get_plex()
+    if not plex_instance:
+        return jsonify({'error': 'Plex not connected', 'libraries': []}), 503
+    try:
+        libs = [{'id': str(s.key), 'title': s.title, 'type': s.type}
+                for s in plex_instance.library.sections()]
+        return jsonify({'libraries': libs})
+    except Exception as exc:
+        return jsonify({'error': str(exc), 'libraries': []}), 500
 
 
 @app.route('/api/geoip')
