@@ -1765,7 +1765,14 @@ def api_sessions():
             username = usernames[0] if usernames else getattr(s, 'username', 'Unknown')
 
             player_address = getattr(player, 'address', '') or '' if player else ''
-            player_remote  = getattr(player, 'remotePublicAddress', '') or '' if player else ''
+            # PlexAPI's PlexClient._loadData doesn't map remotePublicAddress, so
+            # getattr() always returns ''. Fall back to reading the raw XML attrib.
+            _raw_remote = (
+                getattr(player, 'remotePublicAddress', None)
+                or (player._data.attrib.get('remotePublicAddress') if player and hasattr(player, '_data') else None)
+                or ''
+            )
+            player_remote = _raw_remote if player else ''
 
             result.append({
                 'session_id':       str(getattr(s, 'sessionKey', id(s))),
