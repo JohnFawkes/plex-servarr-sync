@@ -1817,7 +1817,20 @@ def api_thumb():
             # other types that the browser would render, which could allow XSS.
             if not ct.startswith('image/'):
                 ct = 'image/jpeg'
-            return resp.content, 200, {
+            body = resp.content
+            # Validate response starts with a known image magic-byte signature.
+            # This breaks the taint chain — if Plex returns anything other than
+            # a real image (e.g. an HTML error page), we refuse to forward it.
+            _IMAGE_MAGIC = (
+                b'\xff\xd8\xff',        # JPEG
+                b'\x89PNG\r\n',         # PNG
+                b'GIF8',                # GIF
+                b'RIFF',                # WebP (RIFF....WEBP)
+                b'BM',                  # BMP
+            )
+            if not any(body.startswith(magic) for magic in _IMAGE_MAGIC):
+                return '', 502
+            return body, 200, {
                 'Content-Type': ct,
                 'Cache-Control': 'public, max-age=3600',
                 'X-Content-Type-Options': 'nosniff',
