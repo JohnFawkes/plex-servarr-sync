@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Invites · Plex Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><rect width='24' height='24' rx='4' fill='%230d0d0f'/><path stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' d='M20 12a8 8 0 1 1-1.6-4.8'/><polyline stroke='%23e5a00d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='20,4 20,8 16,8'/></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
@@ -237,11 +238,13 @@
       <h1>MEDIA SERVARR SYNC</h1>
       <nav class="header-nav">
         <a href="/" class="nav-link">Sync</a>
+        <a href="/now-playing" class="nav-link">Now Playing</a>
         <a href="/invites" class="nav-link active">Invites</a>
       </nav>
     </div>
     <a class="logout" href="/logout">Logout</a>
   </header>
+  <div id="page-content">
 
   {% if demo %}
   <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;color:var(--warn);background:rgba(251,146,60,0.07);border:1px solid rgba(251,146,60,0.3);border-radius:var(--radius);padding:8px 14px;margin-bottom:20px;text-align:center;">
@@ -441,19 +444,64 @@
       <div class="empty">No invites created yet.</div>
     {% endif %}
   </div>
+  </div>{# /page-content #}
 </div>
 
-<script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=" crossorigin=""></script>
+<script>/* PJAX: intercept nav-link clicks, swap #page-content, re-run page-init */
+(function() {
+  function pjaxLoad(url) {
+    if (typeof window.__pjaxCleanup === 'function') {
+      try { window.__pjaxCleanup(); } catch(e) {}
+      window.__pjaxCleanup = null;
+    }
+    fetch(url)
+      .then(function(r) { if (!r.ok) throw r; return r.text(); })
+      .then(function(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var nc = doc.getElementById('page-content');
+        var cc = document.getElementById('page-content');
+        if (nc && cc) cc.innerHTML = nc.innerHTML;
+        var newPath = new URL(url, location.origin).pathname;
+        document.querySelectorAll('a.nav-link').forEach(function(a) {
+          a.classList.toggle('active', new URL(a.href, location.origin).pathname === newPath);
+        });
+        document.title = doc.title || document.title;
+        history.pushState({pjax: url}, '', url);
+        window.scrollTo(0, 0);
+        var init = doc.getElementById('page-init');
+        if (init) {
+          var s = document.createElement('script');
+          s.textContent = init.textContent;
+          document.body.appendChild(s);
+          document.body.removeChild(s);
+        }
+      })
+      .catch(function() { location.href = url; });
+  }
+  document.addEventListener('click', function(e) {
+    var a = e.target.closest('a.nav-link');
+    if (!a || !a.href) return;
+    if (new URL(a.href, location.origin).origin !== location.origin) return;
+    e.preventDefault();
+    pjaxLoad(a.href);
+  });
+  window.addEventListener('popstate', function(e) {
+    if (e.state && e.state.pjax) pjaxLoad(e.state.pjax);
+  });
+  history.replaceState({pjax: location.href}, '');
+})();
+</script>
+<script id="page-init">
+window.__pjaxCleanup = function() { window.onscroll = null; };
+
 function copyLink(elId, btn) {
   var el = document.getElementById(elId);
   if (!el) return;
   navigator.clipboard.writeText(el.textContent.trim()).then(function() {
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = 'Copy Link';
-      btn.classList.remove('copied');
-    }, 2000);
+    setTimeout(function() { btn.textContent = 'Copy Link'; btn.classList.remove('copied'); }, 2000);
   });
 }
 
@@ -464,9 +512,7 @@ function toggleGrants(btn) {
 }
 
 var btt = document.getElementById('back-to-top');
-if (btt) window.addEventListener('scroll', function() {
-  btt.classList.toggle('visible', window.scrollY > 300);
-});
+if (btt) { window.onscroll = function() { btt.classList.toggle('visible', window.scrollY > 300); }; }
 </script>
 </body>
 </html>

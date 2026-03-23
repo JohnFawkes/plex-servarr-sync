@@ -220,6 +220,25 @@
     margin-top: 4px; line-height: 1.5;
   }
 
+  /* -------- Library scan card -------- */
+  .input-row { display: flex; gap: 8px; align-items: stretch; }
+  select, button[type="button"].scan-btn {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    padding: 10px 14px; outline: none;
+  }
+  #library-scan-btn {
+    background: var(--accent); border: none; border-radius: var(--radius);
+    color: #0d0d0f; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    font-weight: 600; letter-spacing: 0.06em; padding: 10px 18px;
+    cursor: pointer; text-transform: uppercase; transition: opacity 0.15s; white-space: nowrap;
+  }
+  #library-scan-btn:hover { opacity: 0.85; }
+  #library-scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .msg { margin-top: 14px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 10px 14px; border-radius: var(--radius); border-left: 3px solid; }
+  .msg.success { border-color: var(--success); color: var(--success); background: rgba(74,222,128,0.07); }
+  .msg.error   { border-color: var(--error);   color: var(--error);   background: rgba(248,113,113,0.07); }
+
   /* Leaflet dark theme */
   .leaflet-tile { filter: brightness(0.6) invert(1) hue-rotate(180deg) saturate(0.5); }
   .leaflet-container { background: #1a1a1f; }
@@ -245,6 +264,7 @@
     </div>
     <a class="logout" href="/logout">Logout</a>
   </header>
+  <div id="page-content">
 
   {% if demo %}
   <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;color:var(--warn);background:rgba(251,146,60,0.07);border:1px solid rgba(251,146,60,0.3);border-radius:var(--radius);padding:8px 14px;margin-bottom:20px;text-align:center;">
@@ -265,17 +285,80 @@
       <div class="np-empty">Loading…</div>
     </div>
   </div>
+
+  <div class="card">
+    <div class="card-label">Full Library Scan</div>
+    <div class="input-row">
+      <select id="library-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:13px;padding:10px 14px;outline:none;">
+        <option value="">Loading libraries…</option>
+      </select>
+      <button type="button" id="library-scan-btn" onclick="triggerLibraryScan()">SCAN</button>
+    </div>
+    <div id="library-scan-msg" style="display:none;" class="msg"></div>
+  </div>
+
+  </div>{# /page-content #}
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=" crossorigin=""></script>
-<script>
+<script>/* PJAX: intercept nav-link clicks, swap #page-content, re-run page-init */
+(function() {
+  function pjaxLoad(url) {
+    if (typeof window.__pjaxCleanup === 'function') {
+      try { window.__pjaxCleanup(); } catch(e) {}
+      window.__pjaxCleanup = null;
+    }
+    fetch(url)
+      .then(function(r) { if (!r.ok) throw r; return r.text(); })
+      .then(function(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var nc = doc.getElementById('page-content');
+        var cc = document.getElementById('page-content');
+        if (nc && cc) cc.innerHTML = nc.innerHTML;
+        var newPath = new URL(url, location.origin).pathname;
+        document.querySelectorAll('a.nav-link').forEach(function(a) {
+          a.classList.toggle('active', new URL(a.href, location.origin).pathname === newPath);
+        });
+        document.title = doc.title || document.title;
+        history.pushState({pjax: url}, '', url);
+        window.scrollTo(0, 0);
+        var init = doc.getElementById('page-init');
+        if (init) {
+          var s = document.createElement('script');
+          s.textContent = init.textContent;
+          document.body.appendChild(s);
+          document.body.removeChild(s);
+        }
+      })
+      .catch(function() { location.href = url; });
+  }
+  document.addEventListener('click', function(e) {
+    var a = e.target.closest('a.nav-link');
+    if (!a || !a.href) return;
+    if (new URL(a.href, location.origin).origin !== location.origin) return;
+    e.preventDefault();
+    pjaxLoad(a.href);
+  });
+  window.addEventListener('popstate', function(e) {
+    if (e.state && e.state.pjax) pjaxLoad(e.state.pjax);
+  });
+  history.replaceState({pjax: location.href}, '');
+})();
+</script>
+<script id="page-init">
 (function(){
   var NP_INTERVAL = 10;
   var npRemaining = NP_INTERVAL;
   var npTick;
   var activeMaps = {};
   var PLEX_URL = {{ plex_url | tojson }};
+
+  window.__pjaxCleanup = function() {
+    clearInterval(npTick);
+    Object.keys(activeMaps).forEach(function(k) { try { activeMaps[k].remove(); } catch(e) {} });
+    activeMaps = {};
+  };
 
   var npCountdownEl = document.getElementById('np-countdown');
   var npBtn         = document.getElementById('np-refresh-btn');
@@ -500,7 +583,46 @@
 
   if (npBtn) npBtn.addEventListener('click', doNpRefresh);
   doNpRefresh();
+
+  /* ---------- library scan ---------- */
+  (function() {
+    function escHtmlSel(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    fetch('/api/libraries').then(function(r){ return r.json(); }).then(function(data) {
+      var sel = document.getElementById('library-select');
+      if (!sel) return;
+      var libs = data.libraries || [];
+      if (!libs.length) { sel.innerHTML = '<option value="">No libraries found</option>'; return; }
+      sel.innerHTML = libs.map(function(l) {
+        return '<option value="' + escHtmlSel(String(l.id)) + '">' + escHtmlSel(l.title) + '</option>';
+      }).join('');
+    }).catch(function() {
+      var sel = document.getElementById('library-select');
+      if (sel) sel.innerHTML = '<option value="">Failed to load libraries</option>';
+    });
+  })();
 })();
+
+function triggerLibraryScan() {
+  var sel   = document.getElementById('library-select');
+  var btn   = document.getElementById('library-scan-btn');
+  var msgEl = document.getElementById('library-scan-msg');
+  if (!sel || !sel.value) return;
+  btn.disabled = true; btn.textContent = 'SCANNING…';
+  if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
+  fetch('/api/scan/library', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({section_id: sel.value})})
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+      if (msgEl) {
+        msgEl.className = 'msg ' + (res.ok ? 'success' : 'error');
+        msgEl.textContent = res.ok
+          ? '✓ Full scan queued for: ' + (res.data.library || sel.options[sel.selectedIndex].text)
+          : '✗ ' + (res.data.error || 'Unknown error');
+        msgEl.style.display = '';
+      }
+    }).catch(function() {
+      if (msgEl) { msgEl.className = 'msg error'; msgEl.textContent = '✗ Request failed'; msgEl.style.display = ''; }
+    }).finally(function() { btn.disabled = false; btn.textContent = 'SCAN'; });
+}
 </script>
 </body>
 </html>
