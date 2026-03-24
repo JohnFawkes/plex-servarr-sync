@@ -302,6 +302,7 @@
   {% endif %}
 
   <form method="post" action="/invite/{{ token }}/accept">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label for="plex_username">Plex Username or Email</label>
       <input type="text" id="plex_username" name="plex_username"

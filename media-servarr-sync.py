@@ -25,6 +25,7 @@ import signal
 import sys
 import sqlite3
 import ipaddress
+import math
 import secrets as _secrets
 from collections import deque
 from dataclasses import dataclass, field
@@ -219,6 +220,17 @@ def _is_private_ip(ip: str) -> bool:
         return ipaddress.ip_address(ip).is_private
     except ValueError:
         return True
+
+
+def _sanitize_floats(obj):
+    """Recursively replace NaN/Infinity float values with None (valid JSON)."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_floats(v) for v in obj]
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    return obj
 
 
 def _get_quality_profile_name(arr_type: str, item_id: int) -> str:
@@ -1826,13 +1838,18 @@ def api_thumb():
     except (ValueError, TypeError):
         return '', 400
     try:
-        url = (
-            f"{PLEX_URL}/photo/:/transcode"
-            f"?url={urllib.parse.quote(key)}"
-            f"&width={width}&height={height}&minSize=1&upscale=1"
-            f"&X-Plex-Token={PLEX_TOKEN}"
+        resp = requests.get(
+            PLEX_URL.rstrip('/') + '/photo/:/transcode',
+            params={
+                'url': key,
+                'width': width,
+                'height': height,
+                'minSize': 1,
+                'upscale': 1,
+                'X-Plex-Token': PLEX_TOKEN,
+            },
+            timeout=10,
         )
-        resp = requests.get(url, timeout=10)
         if resp.ok:
             # Map the response Content-Type to a known-safe literal from a
             # whitelist.  This breaks any taint originating from the user-
@@ -1921,27 +1938,32 @@ def api_geoip():
     ip = request.args.get('ip', '').strip()
     if not ip:
         return jsonify({'error': 'no ip'}), 400
-    if _is_private_ip(ip):
-        return jsonify({'private': True, 'ip': ip})
+    # Normalize and validate the IP; reject if private/invalid.
+    try:
+        safe_ip = str(ipaddress.ip_address(ip))
+    except ValueError:
+        return jsonify({'error': 'invalid ip'}), 400
+    if ipaddress.ip_address(safe_ip).is_private:
+        return jsonify({'private': True, 'ip': safe_ip})
     with _geo_cache_lock:
-        cached = _geo_cache.get(ip)
+        cached = _geo_cache.get(safe_ip)
         if cached and time.time() - cached.get('_ts', 0) < 86400:
             out = dict(cached)
             out.pop('_ts', None)
-            return jsonify(out)
+            return jsonify(_sanitize_floats(out))
     try:
         r = requests.get(
-            f'http://ip-api.com/json/{ip}'
-            '?fields=status,city,country,countryCode,regionName,lat,lon,isp,org,query',
+            'http://ip-api.com/json/' + safe_ip,
+            params={'fields': 'status,city,country,countryCode,regionName,lat,lon,isp,org,query'},
             timeout=5,
         )
         data = r.json()
         data['_ts'] = time.time()
         with _geo_cache_lock:
-            _geo_cache[ip] = data
+            _geo_cache[safe_ip] = data
         out = dict(data)
         out.pop('_ts', None)
-        return jsonify(out)
+        return jsonify(_sanitize_floats(out))
     except Exception as exc:
         log.warning("GeoIP lookup failed for ip=%r: %s", request.args.get('ip'), exc)
         return jsonify({'error': 'Geolocation lookup failed.'}), 500
@@ -2096,7 +2118,6 @@ def invite_onboard(token):
 
 
 @app.route('/invite/<token>/accept', methods=['POST'])
-@csrf.exempt
 def accept_invite(token):
     invite = invite_db.get(token)
     err = _invite_validity(invite)
