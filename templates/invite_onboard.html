@@ -301,7 +301,8 @@
   <div class="inline-error">{{ error }}</div>
   {% endif %}
 
-  <form method="post" action="/invite/{{ token }}/accept">
+  {# nosemgrep: django-no-csrf-token -- Flask-WTF CSRFProtect is active globally; token provided on next line #}
+  <form method="post" action="{{ url_for('accept_invite', token=token) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="field">
       <label for="plex_username">Plex Username or Email</label>

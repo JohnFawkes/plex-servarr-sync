@@ -2049,9 +2049,9 @@ def invites_page():
 def create_invite():
     label             = request.form.get('label', '').strip()
     section_ids       = request.form.getlist('sections')
-    allow_sync        = bool(request.form.get('allow_sync'))
-    allow_channels    = bool(request.form.get('allow_channels'))
-    home_user         = bool(request.form.get('home_user'))
+    allow_sync        = 'allow_sync' in request.form
+    allow_channels    = 'allow_channels' in request.form
+    home_user         = 'home_user' in request.form
     duration_days     = int(request.form.get('duration_days', '0') or '0')
     max_uses          = int(request.form.get('max_uses', '1') or '1')
     link_expires_days = int(request.form.get('link_expires_days', '7') or '7')

@@ -867,8 +867,19 @@
         var onSync = newPath === '/';
         var btt = document.getElementById('back-to-top');
         var leg = document.querySelector('.legend');
-        if (btt) btt.style.display = onSync ? '' : 'none';
-        if (leg) leg.style.display = onSync ? '' : 'none';
+        if (onSync) {
+          if (!btt) {
+            var nb = doc.getElementById('back-to-top');
+            if (nb) document.body.insertBefore(nb.cloneNode(true), document.body.firstChild);
+          } else { btt.style.display = ''; }
+          if (!leg) {
+            var nl = doc.querySelector('.legend');
+            if (nl) document.body.insertBefore(nl.cloneNode(true), document.body.firstChild);
+          } else { leg.style.display = ''; }
+        } else {
+          if (btt) btt.style.display = 'none';
+          if (leg) leg.style.display = 'none';
+        }
         var init = doc.getElementById('page-init');
         if (init) {
           var s = document.createElement('script');
