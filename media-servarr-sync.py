@@ -209,7 +209,7 @@ _cf_cache: dict[str, list] = {}   # arr_type → [{id, name, ...}, ...]
 _cf_lock  = threading.Lock()
 
 # ---------------------------------------------------------------------------
-# Geo-IP cache (server-side proxy to ip-api.com)
+# Geo-IP cache (server-side proxy to ipinfo.io)
 # ---------------------------------------------------------------------------
 _geo_cache: dict[str, dict] = {}   # ip → {status, city, country, lat, lon, ...}
 _geo_cache_lock = threading.Lock()
@@ -1935,7 +1935,7 @@ def api_libraries():
 @app.route('/api/geoip')
 @requires_auth
 def api_geoip():
-    """Proxy IP geolocation via ip-api.com with server-side caching."""
+    """Proxy IP geolocation via ipinfo.io with server-side caching."""
     ip = request.args.get('ip', '').strip()
     if not ip:
         return jsonify({'error': 'no ip'}), 400
@@ -1946,20 +1946,44 @@ def api_geoip():
         return jsonify({'error': 'invalid ip'}), 400
     if ipaddress.ip_address(safe_ip).is_private:
         return jsonify({'private': True, 'ip': safe_ip})
+    now = time.time()
     with _geo_cache_lock:
         cached = _geo_cache.get(safe_ip)
-        if cached and time.time() - cached.get('_ts', 0) < 86400:
-            out = dict(cached)
-            out.pop('_ts', None)
-            return jsonify(_sanitize_floats(out))
+        if cached:
+            if cached.get('_error'):
+                # Return cached failure for 5 minutes to avoid hammering the API
+                if now - cached.get('_ts', 0) < 300:
+                    return jsonify({'error': 'Geolocation lookup failed.'}), 500
+            elif now - cached.get('_ts', 0) < 86400:
+                out = dict(cached)
+                out.pop('_ts', None)
+                return jsonify(_sanitize_floats(out))
     try:
         r = requests.get(
-            'http://ip-api.com/json/' + safe_ip,
-            params={'fields': 'status,city,country,countryCode,regionName,lat,lon,isp,org,query'},
+            'https://ipinfo.io/' + safe_ip + '/json',
             timeout=5,
         )
-        data = r.json()
-        data['_ts'] = time.time()
+        raw = r.json()
+        # Normalize ipinfo.io response to ip-api.com field names expected by the frontend
+        lat, lon = None, None
+        if raw.get('loc'):
+            try:
+                lat, lon = (float(x) for x in raw['loc'].split(',', 1))
+            except ValueError:
+                pass
+        data = {
+            'status':     'success',
+            'query':      safe_ip,
+            'city':       raw.get('city', ''),
+            'country':    raw.get('country', ''),
+            'countryCode': raw.get('country', ''),
+            'regionName': raw.get('region', ''),
+            'lat':        lat,
+            'lon':        lon,
+            'isp':        raw.get('org', ''),
+            'org':        raw.get('org', ''),
+            '_ts':        now,
+        }
         with _geo_cache_lock:
             _geo_cache[safe_ip] = data
         out = dict(data)
@@ -1967,6 +1991,8 @@ def api_geoip():
         return jsonify(_sanitize_floats(out))
     except Exception as exc:
         log.warning("GeoIP lookup failed for ip=%r: %s", request.args.get('ip'), exc)
+        with _geo_cache_lock:
+            _geo_cache[safe_ip] = {'_error': True, '_ts': now}
         return jsonify({'error': 'Geolocation lookup failed.'}), 500
 
 
@@ -2244,4 +2270,4 @@ if __name__ == '__main__':
     invite_thread.start()
 
     log.info("Webhook receiver active on port %d", PORT)
-    serve(app, host='0.0.0.0', port=PORT)
+    serve(app, host='0.0.0.0', port=PORT, asyncore_use_poll=True)
