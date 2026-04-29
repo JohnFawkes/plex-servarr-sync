@@ -58,7 +58,7 @@ jobs:
       # NEW: Create a GitHub Release (Only on push to main)
       - name: Create a GitHub Release
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
